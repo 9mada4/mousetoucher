@@ -6,22 +6,23 @@
   <img alt="Mouse Toucher Logo" src="mousetoucher-light.png">
 </picture>
 
-**Finally, tap-to-click for your Apple Magic Mouse!** (v1.1)
+**Intentional tap-to-click for your Apple Magic Mouse.** (v1.2)
 
-Mouse Toucher brings trackpad-style tap-to-click functionality to the Apple Magic Mouse. Simply tap the left or right side of your mouse surface to click - no more pressing down the button.
+Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse. Keep one finger still as an anchor, then tap with another finger to click without pressing the mouse surface down. A single resting finger never clicks by itself.
 
 ## ✨ Features
 
-- 🖱️ **Tap left side** for left-click
-- 🖱️ **Tap right side** for right-click
-- ⚡ **Fast & responsive** - no noticeable delay
+- 🖱️ **Anchor + left-side tap** for left-click
+- 🖱️ **Anchor + right-side tap** for right-click
+- ⚡ **Repeat the tap** for double- and multi-click
+- 🛡️ **Movement cancellation** prevents scrolling and ordinary finger movement from becoming clicks
 - 🎯 **Easy toggle** on/off from the menu bar
 - 🔒 **Privacy-focused** - runs entirely on your Mac, no network access
 
 ## 📋 Requirements
 
 - macOS 11.0 (Big Sur) or later
-- Apple Magic Mouse (1st or 2nd generation)
+- Apple Magic Mouse
 - Your Magic Mouse must be connected via Bluetooth
 
 ## 🚀 Installation
@@ -32,7 +33,7 @@ A universal binary (works on both Apple Silicon and Intel Macs) is included in t
 
 ```bash
 # Navigate to the repository
-cd /path/to/mousetoucher-claude
+cd /path/to/mousetoucher
 
 # Copy to Applications
 cp -r build/MouseToucher.app /Applications/
@@ -43,7 +44,7 @@ cp -r build/MouseToucher.app /Applications/
 If you prefer to build it yourself:
 
 ```bash
-cd /path/to/mousetoucher-claude
+cd /path/to/mousetoucher
 ./build.sh   # Builds and ad-hoc codesigns the app so Accessibility permissions stick
 cp -r build/MouseToucher.app /Applications/
 ```
@@ -63,24 +64,35 @@ That's it! You'll see a mouse icon in your menu bar.
 ### Basic Usage
 
 1. Look for the **mouse icon** 🖱️ in your menu bar (top-right of screen)
-2. **Tap anywhere** on your Magic Mouse surface to click
-   - Tap **left side** = normal click
-   - Tap **right side** = right-click (context menu)
-3. You can still click the mouse button normally - tapping is just an additional way to click
+2. Rest one finger on the mouse and keep it still
+3. With another finger, make a quick tap
+   - Tap the **left half** = normal click
+   - Tap the **right half** = right-click (context menu)
+4. Keep the anchor finger down and tap again for a double- or multi-click
+5. You can still press the mouse normally; physical clicks cancel any in-progress tap gesture
 
 ### Menu Bar Controls
 
 Click the mouse icon in your menu bar to:
 
-- **Enable/Disable** tap-to-click (checkmark shows when enabled)
+- **Enable/Disable** compound tap (checkmark shows when enabled)
 - **View About** information
 - **Quit** the app
 
 ### Tips
 
-- 💡 Keep your taps **quick and light** for best results
+- 💡 Keep the anchor finger still and make the second-finger tap **quick and light**
 - 💡 The dividing line between left/right is roughly in the center of the mouse
+- 💡 If a gesture is cancelled, lift all fingers once before starting again
 - 💡 To disable temporarily, click the menu bar icon and toggle it off
+
+## 🧪 Tests
+
+The gesture recognizer and click-sequence logic have deterministic tests that run with Apple's Command Line Tools; a full Xcode installation is not required.
+
+```bash
+./run_tests.sh
+```
 
 ## 🔧 Auto-Start on Login (Optional)
 
@@ -145,12 +157,12 @@ These permissions are granted by you in System Settings and can be revoked at an
 If taps are too sensitive or not sensitive enough, you can adjust the settings:
 
 1. Open `MultitouchManager.swift` in a text editor
-2. Find these lines near the top:
+2. Find the `CompoundTapDetector` settings near the top:
    ```swift
-   tapTimeThreshold: 0.25,      // How long a tap can be (seconds)
-   tapMovementThreshold: 0.08    // How much finger movement is allowed
+   tapTimeThreshold: 0.28,  // Maximum second-finger tap duration, in seconds
+   movementThreshold: 0.04  // Maximum normalized movement for either finger
    ```
-3. Make the numbers **smaller** for stricter detection, **larger** for more lenient
+3. Make the numbers **smaller** for stricter detection or **larger** for more lenient detection
 4. Save and run `./build.sh` again
 
 ## 🗑️ Uninstalling

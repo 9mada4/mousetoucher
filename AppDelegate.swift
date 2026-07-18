@@ -8,6 +8,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasStartedMultitouch = false
     private var hasRequestedAccessibilityPrompt = false
     private var hasShownAccessibilityInstructions = false
+    private var clickSequenceTracker = ClickSequenceTracker(
+        doubleClickInterval: NSEvent.doubleClickInterval,
+        maximumCursorMovement: 5.0
+    )
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
@@ -47,7 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
 
-        let enabledItem = NSMenuItem(title: "Tap to Click: Enabled", action: #selector(toggleEnabled), keyEquivalent: "")
+        let enabledItem = NSMenuItem(title: "Compound Tap: Enabled", action: #selector(toggleEnabled), keyEquivalent: "")
         enabledItem.state = isEnabled ? .on : .off
         menu.addItem(enabledItem)
 
@@ -69,21 +73,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let menu = statusItem?.menu,
            let item = menu.items.first {
             item.state = isEnabled ? .on : .off
-            item.title = isEnabled ? "Tap to Click: Enabled" : "Tap to Click: Disabled"
+            item.title = isEnabled ? "Compound Tap: Enabled" : "Compound Tap: Disabled"
         }
         multitouchManager?.setEnabled(isEnabled)
+        if !isEnabled {
+            clickSequenceTracker.reset()
+        }
     }
 
     @objc func showAbout() {
         let alert = NSAlert()
         alert.messageText = "Mouse Toucher"
         alert.informativeText = """
-        Tap-to-click for Magic Mouse
+        Intentional tap-to-click for Magic Mouse
 
-        • Tap left side for left click
-        • Tap right side for right click
+        • Keep one finger still on the mouse
+        • Tap the left side with another finger for left click
+        • Tap the right side with another finger for right click
+        • Repeat taps for double and multi-click
 
-        Version 1.0
+        Version 1.2
 
         Uses private MultitouchSupport framework
         """
@@ -112,8 +121,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasStartedMultitouch = true
 
         multitouchManager = MultitouchManager()
-        multitouchManager?.onClickSynthesized = { [weak self] location, isRightClick in
-            self?.synthesizeClick(at: location, isRightClick: isRightClick)
+        multitouchManager?.onClickSynthesized = { [weak self] location, button in
+            DispatchQueue.main.async {
+                self?.synthesizeClick(at: location, button: button)
+            }
         }
         multitouchManager?.start()
     }
@@ -139,21 +150,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func synthesizeClick(at location: CGPoint, isRightClick: Bool) {
-        if isRightClick {
-            if let mouseDown = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: location, mouseButton: .right) {
-                mouseDown.post(tap: .cghidEventTap)
-            }
-            if let mouseUp = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: location, mouseButton: .right) {
-                mouseUp.post(tap: .cghidEventTap)
-            }
-        } else {
-            if let mouseDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: location, mouseButton: .left) {
-                mouseDown.post(tap: .cghidEventTap)
-            }
-            if let mouseUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: location, mouseButton: .left) {
-                mouseUp.post(tap: .cghidEventTap)
-            }
+    func synthesizeClick(at location: CGPoint, button: CompoundTapButton) {
+        let timestamp = ProcessInfo.processInfo.systemUptime
+        let clickCount = clickSequenceTracker.nextClickCount(
+            button: button,
+            location: location,
+            timestamp: timestamp
+        )
+
+        let mouseButton: CGMouseButton = button == .right ? .right : .left
+        let mouseDownType: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
+        let mouseUpType: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
+
+        if let mouseDown = CGEvent(
+            mouseEventSource: nil,
+            mouseType: mouseDownType,
+            mouseCursorPosition: location,
+            mouseButton: mouseButton
+        ) {
+            mouseDown.setIntegerValueField(.mouseEventClickState, value: clickCount)
+            mouseDown.post(tap: .cghidEventTap)
+        }
+
+        if let mouseUp = CGEvent(
+            mouseEventSource: nil,
+            mouseType: mouseUpType,
+            mouseCursorPosition: location,
+            mouseButton: mouseButton
+        ) {
+            mouseUp.setIntegerValueField(.mouseEventClickState, value: clickCount)
+            mouseUp.post(tap: .cghidEventTap)
         }
     }
 }
