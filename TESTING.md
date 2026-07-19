@@ -15,7 +15,10 @@ The suite currently checks:
 - a single finger never produces a click
 - anchor plus a left- or right-side tap produces the correct button
 - the same anchor can be reused for consecutive clicks
-- slow taps, finger movement, anchor movement, replacement touches, and a third finger are rejected
+- holding the second finger begins a drag and lifting it ends the drag
+- moving either finger or lifting the anchor does not interrupt an active drag
+- cancelling or disabling always releases an active drag
+- finger movement, anchor movement, replacement touches, and a third finger are rejected
 - invalid gestures require a clean release before recognition resumes
 - consecutive click counts increment for double- and multi-clicks
 - changing the button, waiting too long, moving the cursor, or resetting starts a new click sequence
@@ -34,7 +37,7 @@ Build the complete universal macOS application:
 ./build.sh
 ```
 
-The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher.app`, and applies an ad-hoc signature.
+The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 1.4.app`, and applies an ad-hoc signature.
 
 ## Manual Magic Mouse checklist
 
@@ -43,7 +46,9 @@ The application build compiles both Apple Silicon and Intel binaries, combines t
 - Hold one finger still and tap the left half with a second finger: one left-click occurs.
 - Hold one finger still and tap the right half with a second finger: one right-click occurs.
 - Repeat the second-finger tap while keeping the anchor down: double-click and multi-click actions work.
-- Moving either finger beyond the threshold cancels the gesture.
+- Hold the second finger for about 0.28 seconds, move the mouse, then lift the finger: the item follows and drops.
+- Moving either finger before dragging begins cancels the gesture.
+- Moving either finger after dragging begins does not release the dragged item.
 - Adding a third finger cancels the gesture.
 - Pressing the physical mouse button cancels the gesture but still performs the normal physical click.
 - Disabling compound tap prevents synthesized clicks immediately.

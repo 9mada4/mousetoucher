@@ -16,12 +16,19 @@ struct CompoundTap: Equatable {
     let surfaceLocation: CGPoint
 }
 
-/// Recognizes a quick tap made while another finger remains stationary.
+enum CompoundGestureEvent: Equatable {
+    case click(CompoundTap)
+    case dragBegan(CompoundTap)
+    case dragEnded(CompoundTapButton)
+}
+
+/// Recognizes a tap or tap-and-hold made while another finger remains stationary.
 ///
 /// The first finger becomes the anchor. A second finger must touch and release
 /// without either finger moving beyond the configured threshold. The anchor
-/// remains active after a successful tap so it can be reused for consecutive
-/// clicks, including double-clicks.
+/// remains active after a successful gesture so it can be reused for
+/// consecutive clicks. Holding the second finger beyond `tapTimeThreshold`
+/// begins a drag that ends when the second finger lifts.
 final class CompoundTapDetector {
     let tapTimeThreshold: TimeInterval
     let movementThreshold: CGFloat
@@ -38,6 +45,7 @@ final class CompoundTapDetector {
     private var tappingFingerWasRejected = false
     private var canBeginTap = true
     private var requiresAllFingersReleased = false
+    private(set) var activeDragButton: CompoundTapButton?
 
     init(
         tapTimeThreshold: TimeInterval = 0.28,
@@ -49,18 +57,26 @@ final class CompoundTapDetector {
         self.rightClickSplit = rightClickSplit
     }
 
-    func process(touches: [CompoundTouch], timestamp: TimeInterval) -> CompoundTap? {
+    func process(touches: [CompoundTouch], timestamp: TimeInterval) -> CompoundGestureEvent? {
         if touches.isEmpty {
+            let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
             reset()
-            return nil
+            return dragEnd
+        }
+
+        // Once a drag starts, surface movement is expected: the user is moving
+        // the whole mouse while keeping the second finger down. Do not apply
+        // the strict tap-movement threshold or require the anchor to remain
+        // perfectly stationary. The held second finger alone owns the drag.
+        if activeDragButton != nil {
+            return processActiveDrag(touches: touches, timestamp: timestamp)
         }
 
         guard !requiresAllFingersReleased else { return nil }
 
         guard let anchor else {
             guard touches.count == 1, let firstTouch = touches.first else {
-                invalidateUntilAllFingersAreReleased()
-                return nil
+                return invalidateUntilAllFingersAreReleased()
             }
 
             self.anchor = TrackedTouch(
@@ -73,19 +89,16 @@ final class CompoundTapDetector {
 
         guard let currentAnchor = touches.first(where: { $0.identifier == anchor.identifier }) else {
             // Do not reinterpret the tapping finger as an anchor mid-gesture.
-            invalidateUntilAllFingersAreReleased()
-            return nil
+            return invalidateUntilAllFingersAreReleased()
         }
 
         guard distance(from: anchor.startPosition, to: currentAnchor.position) <= movementThreshold else {
-            invalidateUntilAllFingersAreReleased()
-            return nil
+            return invalidateUntilAllFingersAreReleased()
         }
 
         let secondaryTouches = touches.filter { $0.identifier != anchor.identifier }
         guard secondaryTouches.count <= 1 else {
-            invalidateUntilAllFingersAreReleased()
-            return nil
+            return invalidateUntilAllFingersAreReleased()
         }
 
         guard let tappingFinger else {
@@ -105,10 +118,17 @@ final class CompoundTapDetector {
 
         if let currentTap = secondaryTouches.first(where: { $0.identifier == tappingFinger.identifier }) {
             let duration = timestamp - tappingFinger.startTime
-            if duration < 0 ||
-                duration > tapTimeThreshold ||
-                distance(from: tappingFinger.startPosition, to: currentTap.position) > movementThreshold {
+            if duration < 0 || distance(from: tappingFinger.startPosition, to: currentTap.position) > movementThreshold {
                 tappingFingerWasRejected = true
+                return nil
+            }
+
+            if !tappingFingerWasRejected,
+               activeDragButton == nil,
+               duration >= tapTimeThreshold {
+                let tap = makeTap(from: tappingFinger)
+                activeDragButton = tap.button
+                return .dragBegan(tap)
             }
             return nil
         }
@@ -116,10 +136,12 @@ final class CompoundTapDetector {
         // Accept another tap only after a clean anchor-only frame. This prevents
         // a replacement touch identifier from being interpreted as a release.
         guard secondaryTouches.isEmpty else {
+            let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
+            activeDragButton = nil
             self.tappingFinger = nil
             tappingFingerWasRejected = false
             canBeginTap = false
-            return nil
+            return dragEnd
         }
 
         defer {
@@ -135,8 +157,14 @@ final class CompoundTapDetector {
             return nil
         }
 
-        let button: CompoundTapButton = tappingFinger.startPosition.x >= rightClickSplit ? .right : .left
-        return CompoundTap(button: button, surfaceLocation: tappingFinger.startPosition)
+        return .click(makeTap(from: tappingFinger))
+    }
+
+    /// Cancels recognition and returns a matching mouse-up event if a drag is active.
+    func cancel() -> CompoundGestureEvent? {
+        let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
+        reset()
+        return dragEnd
     }
 
     func reset() {
@@ -145,14 +173,62 @@ final class CompoundTapDetector {
         tappingFingerWasRejected = false
         canBeginTap = true
         requiresAllFingersReleased = false
+        activeDragButton = nil
     }
 
-    private func invalidateUntilAllFingersAreReleased() {
+    private func invalidateUntilAllFingersAreReleased() -> CompoundGestureEvent? {
+        let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
         anchor = nil
         tappingFinger = nil
         tappingFingerWasRejected = false
         canBeginTap = false
         requiresAllFingersReleased = true
+        activeDragButton = nil
+        return dragEnd
+    }
+
+    private func makeTap(from touch: TrackedTouch) -> CompoundTap {
+        let button: CompoundTapButton = touch.startPosition.x >= rightClickSplit ? .right : .left
+        return CompoundTap(button: button, surfaceLocation: touch.startPosition)
+    }
+
+    private func processActiveDrag(
+        touches: [CompoundTouch],
+        timestamp: TimeInterval
+    ) -> CompoundGestureEvent? {
+        guard let activeDragButton,
+              let tappingFinger else {
+            reset()
+            return nil
+        }
+
+        // Continue the drag regardless of finger movement or anchor loss.
+        guard !touches.contains(where: { $0.identifier == tappingFinger.identifier }) else {
+            return nil
+        }
+
+        self.activeDragButton = nil
+        self.tappingFinger = nil
+        tappingFingerWasRejected = false
+
+        // Rebase a lone surviving anchor so another gesture can begin without
+        // forcing a full release after the mouse has physically moved.
+        if touches.count == 1,
+           let previousAnchor = anchor,
+           let currentAnchor = touches.first(where: { $0.identifier == previousAnchor.identifier }) {
+            anchor = TrackedTouch(
+                identifier: currentAnchor.identifier,
+                startPosition: currentAnchor.position,
+                startTime: timestamp
+            )
+            canBeginTap = true
+        } else {
+            anchor = nil
+            canBeginTap = false
+            requiresAllFingersReleased = true
+        }
+
+        return .dragEnded(activeDragButton)
     }
 
     private func distance(from start: CGPoint, to end: CGPoint) -> CGFloat {

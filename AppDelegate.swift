@@ -12,6 +12,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         doubleClickInterval: NSEvent.doubleClickInterval,
         maximumCursorMovement: 5.0
     )
+    private var activeDrag: (button: CompoundTapButton, clickCount: Int64)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
@@ -24,7 +25,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasShownAccessibilityInstructions = true
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "Mouse Toucher needs accessibility permissions to simulate clicks.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to Mouse Toucher. The app will begin working as soon as permission is granted."
+        alert.informativeText = "MouseToucher 1.4 needs accessibility permissions to simulate clicks.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 1.4. The app will begin working as soon as permission is granted."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Quit")
@@ -40,13 +41,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         multitouchManager?.stop()
+        endActiveDrag(at: CGEvent(source: nil)?.location ?? CGPoint.zero)
     }
 
     func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "Mouse Toucher")
+            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 1.4")
         }
 
         let menu = NSMenu()
@@ -61,9 +63,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(accessibilityItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "About Mouse Toucher", action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "About MouseToucher 1.4", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit Mouse Toucher", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit MouseToucher 1.4", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem?.menu = menu
     }
@@ -83,7 +85,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "Mouse Toucher"
+        alert.messageText = "MouseToucher 1.4"
         alert.informativeText = """
         Intentional tap-to-click for Magic Mouse
 
@@ -91,8 +93,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         • Tap the left side with another finger for left click
         • Tap the right side with another finger for right click
         • Repeat taps for double and multi-click
+        • Hold the second finger down, move the mouse, then lift to drag
 
-        Version 1.2
+        Version 1.4
 
         Uses private MultitouchSupport framework
         """
@@ -121,9 +124,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasStartedMultitouch = true
 
         multitouchManager = MultitouchManager()
-        multitouchManager?.onClickSynthesized = { [weak self] location, button in
-            DispatchQueue.main.async {
-                self?.synthesizeClick(at: location, button: button)
+        multitouchManager?.onGestureRecognized = { [weak self] location, event in
+            let handleEvent: () -> Void = {
+                self?.handleCompoundGesture(event, at: location)
+            }
+
+            if Thread.isMainThread {
+                handleEvent()
+            } else {
+                DispatchQueue.main.async(execute: handleEvent)
             }
         }
         multitouchManager?.start()
@@ -151,35 +160,78 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func synthesizeClick(at location: CGPoint, button: CompoundTapButton) {
-        let timestamp = ProcessInfo.processInfo.systemUptime
-        let clickCount = clickSequenceTracker.nextClickCount(
+        let clickCount = nextClickCount(
             button: button,
-            location: location,
-            timestamp: timestamp
+            location: location
         )
 
-        let mouseButton: CGMouseButton = button == .right ? .right : .left
-        let mouseDownType: CGEventType = button == .right ? .rightMouseDown : .leftMouseDown
-        let mouseUpType: CGEventType = button == .right ? .rightMouseUp : .leftMouseUp
+        postMouseEvent(isDown: true, at: location, button: button, clickCount: clickCount)
+        postMouseEvent(isDown: false, at: location, button: button, clickCount: clickCount)
+    }
 
-        if let mouseDown = CGEvent(
-            mouseEventSource: nil,
-            mouseType: mouseDownType,
-            mouseCursorPosition: location,
-            mouseButton: mouseButton
-        ) {
-            mouseDown.setIntegerValueField(.mouseEventClickState, value: clickCount)
-            mouseDown.post(tap: .cghidEventTap)
+    private func handleCompoundGesture(_ event: CompoundGestureEvent, at location: CGPoint) {
+        switch event {
+        case .click(let tap):
+            synthesizeClick(at: location, button: tap.button)
+        case .dragBegan(let tap):
+            beginDrag(at: location, button: tap.button)
+        case .dragEnded(let button):
+            endActiveDrag(at: location, expectedButton: button)
+        }
+    }
+
+    private func beginDrag(at location: CGPoint, button: CompoundTapButton) {
+        guard activeDrag == nil else { return }
+        let clickCount = nextClickCount(button: button, location: location)
+        activeDrag = (button: button, clickCount: clickCount)
+        postMouseEvent(isDown: true, at: location, button: button, clickCount: clickCount)
+    }
+
+    private func endActiveDrag(at location: CGPoint, expectedButton: CompoundTapButton? = nil) {
+        guard let activeDrag,
+              expectedButton == nil || expectedButton == activeDrag.button else {
+            return
         }
 
-        if let mouseUp = CGEvent(
+        postMouseEvent(
+            isDown: false,
+            at: location,
+            button: activeDrag.button,
+            clickCount: activeDrag.clickCount
+        )
+        self.activeDrag = nil
+    }
+
+    private func nextClickCount(button: CompoundTapButton, location: CGPoint) -> Int64 {
+        clickSequenceTracker.nextClickCount(
+            button: button,
+            location: location,
+            timestamp: ProcessInfo.processInfo.systemUptime
+        )
+    }
+
+    private func postMouseEvent(
+        isDown: Bool,
+        at location: CGPoint,
+        button: CompoundTapButton,
+        clickCount: Int64
+    ) {
+        let mouseButton: CGMouseButton = button == .right ? .right : .left
+        let eventType: CGEventType
+        if button == .right {
+            eventType = isDown ? .rightMouseDown : .rightMouseUp
+        } else {
+            eventType = isDown ? .leftMouseDown : .leftMouseUp
+        }
+
+        if let event = CGEvent(
             mouseEventSource: nil,
-            mouseType: mouseUpType,
+            mouseType: eventType,
             mouseCursorPosition: location,
             mouseButton: mouseButton
         ) {
-            mouseUp.setIntegerValueField(.mouseEventClickState, value: clickCount)
-            mouseUp.post(tap: .cghidEventTap)
+            event.setIntegerValueField(.mouseEventClickState, value: clickCount)
+            event.post(tap: .cghidEventTap)
         }
     }
 }

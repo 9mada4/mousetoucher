@@ -14,7 +14,7 @@ class MultitouchManager {
 
     fileprivate static var sharedInstance: MultitouchManager?
 
-    var onClickSynthesized: ((CGPoint, CompoundTapButton) -> Void)?
+    var onGestureRecognized: ((CGPoint, CompoundGestureEvent) -> Void)?
 
     init() {
         MultitouchManager.sharedInstance = self
@@ -43,6 +43,7 @@ class MultitouchManager {
     }
 
     func stop() {
+        cancelGesture()
         for device in devices {
             MTUnregisterContactFrameCallback(device, touchCallback)
             MTDeviceStop(device)
@@ -53,13 +54,13 @@ class MultitouchManager {
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
         if !enabled {
-            compoundTapDetector.reset()
+            cancelGesture()
         }
     }
 
     func processTouches(_ touches: [CompoundTouch], timestamp: Double) {
         guard isEnabled else {
-            compoundTapDetector.reset()
+            cancelGesture()
             return
         }
 
@@ -67,15 +68,25 @@ class MultitouchManager {
             CGEventSource.buttonState(.hidSystemState, button: .left) ||
             CGEventSource.buttonState(.hidSystemState, button: .right)
 
-        if physicalButtonIsPressed {
-            compoundTapDetector.reset()
+        if physicalButtonIsPressed && compoundTapDetector.activeDragButton == nil {
+            cancelGesture()
             return
         }
 
-        if let tap = compoundTapDetector.process(touches: touches, timestamp: timestamp) {
-            let cursorLocation = CGEvent(source: nil)?.location ?? CGPoint.zero
-            onClickSynthesized?(cursorLocation, tap.button)
+        if let event = compoundTapDetector.process(touches: touches, timestamp: timestamp) {
+            emit(event)
         }
+    }
+
+    private func cancelGesture() {
+        if let event = compoundTapDetector.cancel() {
+            emit(event)
+        }
+    }
+
+    private func emit(_ event: CompoundGestureEvent) {
+        let cursorLocation = CGEvent(source: nil)?.location ?? CGPoint.zero
+        onGestureRecognized?(cursorLocation, event)
     }
 
     deinit {

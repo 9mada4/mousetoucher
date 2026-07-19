@@ -2,8 +2,7 @@
 
 # Build script for Mouse Toucher app (Production)
 
-APP_NAME="MouseToucher"
-BUNDLE_ID="com.mousetoucher.app"
+APP_NAME="MouseToucher 1.4"
 BUILD_DIR="build"
 APP_PATH="$BUILD_DIR/$APP_NAME.app"
 
@@ -97,8 +96,8 @@ echo "App location: $APP_PATH"
 echo "Architectures: arm64 (Apple Silicon) + x86_64 (Intel)"
 echo ""
 echo "To run the app:"
-echo "  open $APP_PATH"
+echo "  open \"$APP_PATH\""
 echo ""
 echo "To install the app (copy to Applications):"
-echo "  cp -r $APP_PATH /Applications/"
+echo "  cp -r \"$APP_PATH\" /Applications/"
 echo ""

@@ -52,7 +52,10 @@ private func testSecondFingerOnLeftCreatesLeftClick() throws {
     try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
 
     let result = detector.process(touches: [anchor], timestamp: 0.12)
-    try expectEqual(result, CompoundTap(button: .left, surfaceLocation: tappingFinger.position))
+    try expectEqual(
+        result,
+        .click(CompoundTap(button: .left, surfaceLocation: tappingFinger.position))
+    )
 }
 
 private func testSecondFingerOnRightCreatesRightClick() throws {
@@ -63,7 +66,10 @@ private func testSecondFingerOnRightCreatesRightClick() throws {
     try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
 
     let result = detector.process(touches: [anchor], timestamp: 0.12)
-    try expectEqual(result, CompoundTap(button: .right, surfaceLocation: tappingFinger.position))
+    try expectEqual(
+        result,
+        .click(CompoundTap(button: .right, surfaceLocation: tappingFinger.position))
+    )
 }
 
 private func testCenterBelongsToRightSide() throws {
@@ -72,7 +78,10 @@ private func testCenterBelongsToRightSide() throws {
 
     try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
     try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
-    try expectEqual(detector.process(touches: [anchor], timestamp: 0.12)?.button, .right)
+    try expectEqual(
+        detector.process(touches: [anchor], timestamp: 0.12),
+        .click(CompoundTap(button: .right, surfaceLocation: tappingFinger.position))
+    )
 }
 
 private func testAnchorCanBeReusedForConsecutiveClicks() throws {
@@ -81,19 +90,90 @@ private func testAnchorCanBeReusedForConsecutiveClicks() throws {
 
     try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
     try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
-    try expectEqual(detector.process(touches: [anchor], timestamp: 0.10)?.button, .left)
+    try expectEqual(
+        detector.process(touches: [anchor], timestamp: 0.10),
+        .click(CompoundTap(button: .left, surfaceLocation: tappingFinger.position))
+    )
 
     try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.15))
-    try expectEqual(detector.process(touches: [anchor], timestamp: 0.20)?.button, .left)
+    try expectEqual(
+        detector.process(touches: [anchor], timestamp: 0.20),
+        .click(CompoundTap(button: .left, surfaceLocation: tappingFinger.position))
+    )
 }
 
-private func testTapLongerThanThresholdIsRejected() throws {
+private func testHoldingSecondFingerBeginsAndEndsDrag() throws {
     let detector = makeDetector()
     let tappingFinger = touch(identifier: 2, x: 0.25)
+    let tap = CompoundTap(button: .left, surfaceLocation: tappingFinger.position)
 
     try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
     try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
-    try expectNil(detector.process(touches: [anchor], timestamp: 0.34))
+    try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.25))
+    try expectEqual(detector.process(touches: [anchor, tappingFinger], timestamp: 0.34), .dragBegan(tap))
+    try expectEqual(detector.activeDragButton, .left)
+    try expectEqual(detector.process(touches: [anchor], timestamp: 0.40), .dragEnded(.left))
+    try expectNil(detector.activeDragButton)
+}
+
+private func testCancelEndsActiveDragExactlyOnce() throws {
+    let detector = makeDetector()
+    let tappingFinger = touch(identifier: 2, x: 0.75)
+    let tap = CompoundTap(button: .right, surfaceLocation: tappingFinger.position)
+
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
+    try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
+    try expectEqual(detector.process(touches: [anchor, tappingFinger], timestamp: 0.34), .dragBegan(tap))
+    try expectEqual(detector.cancel(), .dragEnded(.right))
+    try expectNil(detector.cancel())
+}
+
+private func testMovingAnchorDoesNotInterruptActiveDrag() throws {
+    let detector = makeDetector()
+    let tappingFinger = touch(identifier: 2, x: 0.25)
+    let movedAnchor = touch(identifier: 1, x: 0.55)
+    let tap = CompoundTap(button: .left, surfaceLocation: tappingFinger.position)
+
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
+    try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
+    try expectEqual(detector.process(touches: [anchor, tappingFinger], timestamp: 0.34), .dragBegan(tap))
+    try expectNil(detector.process(touches: [movedAnchor, tappingFinger], timestamp: 0.36))
+    try expectEqual(detector.activeDragButton, .left)
+    try expectEqual(detector.process(touches: [movedAnchor], timestamp: 0.40), .dragEnded(.left))
+
+    // The moved anchor is rebased and can immediately be reused.
+    try expectNil(detector.process(touches: [movedAnchor, tappingFinger], timestamp: 0.45))
+    try expectEqual(
+        detector.process(touches: [movedAnchor], timestamp: 0.50),
+        .click(tap)
+    )
+}
+
+private func testMovingHeldFingerDoesNotInterruptActiveDrag() throws {
+    let detector = makeDetector()
+    let tappingFinger = touch(identifier: 2, x: 0.25)
+    let movedTappingFinger = touch(identifier: 2, x: 0.40)
+    let tap = CompoundTap(button: .left, surfaceLocation: tappingFinger.position)
+
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
+    try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
+    try expectEqual(detector.process(touches: [anchor, tappingFinger], timestamp: 0.34), .dragBegan(tap))
+    try expectNil(detector.process(touches: [anchor, movedTappingFinger], timestamp: 0.36))
+    try expectEqual(detector.activeDragButton, .left)
+    try expectEqual(detector.process(touches: [anchor], timestamp: 0.40), .dragEnded(.left))
+}
+
+private func testAnchorMayLiftDuringActiveDrag() throws {
+    let detector = makeDetector()
+    let tappingFinger = touch(identifier: 2, x: 0.25)
+    let tap = CompoundTap(button: .left, surfaceLocation: tappingFinger.position)
+
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
+    try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
+    try expectEqual(detector.process(touches: [anchor, tappingFinger], timestamp: 0.34), .dragBegan(tap))
+    try expectNil(detector.process(touches: [tappingFinger], timestamp: 0.36))
+    try expectEqual(detector.activeDragButton, .left)
+    try expectEqual(detector.process(touches: [], timestamp: 0.40), .dragEnded(.left))
 }
 
 private func testMovingTappingFingerIsRejected() throws {
@@ -120,7 +200,10 @@ private func testMovingAnchorInvalidatesGestureUntilAllFingersLift() throws {
     try expectNil(detector.process(touches: [], timestamp: 0.20))
     try expectNil(detector.process(touches: [anchor], timestamp: 0.25))
     try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.30))
-    try expectEqual(detector.process(touches: [anchor], timestamp: 0.35)?.button, .left)
+    try expectEqual(
+        detector.process(touches: [anchor], timestamp: 0.35),
+        .click(CompoundTap(button: .left, surfaceLocation: tappingFinger.position))
+    )
 }
 
 private func testReleasingAnchorBeforeTappingFingerDoesNotClick() throws {
@@ -209,7 +292,11 @@ private enum CompoundTapTestRunner {
             ("right compound tap", testSecondFingerOnRightCreatesRightClick),
             ("center split", testCenterBelongsToRightSide),
             ("consecutive taps reuse anchor", testAnchorCanBeReusedForConsecutiveClicks),
-            ("long tap is rejected", testTapLongerThanThresholdIsRejected),
+            ("hold begins and ends drag", testHoldingSecondFingerBeginsAndEndsDrag),
+            ("cancel ends drag once", testCancelEndsActiveDragExactlyOnce),
+            ("moving anchor does not interrupt drag", testMovingAnchorDoesNotInterruptActiveDrag),
+            ("moving held finger does not interrupt drag", testMovingHeldFingerDoesNotInterruptActiveDrag),
+            ("anchor may lift during drag", testAnchorMayLiftDuringActiveDrag),
             ("moving tapping finger is rejected", testMovingTappingFingerIsRejected),
             ("moving anchor requires full release", testMovingAnchorInvalidatesGestureUntilAllFingersLift),
             ("anchor release cancels tap", testReleasingAnchorBeforeTappingFingerDoesNotClick),
