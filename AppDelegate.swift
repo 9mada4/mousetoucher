@@ -1,5 +1,6 @@
 import Cocoa
 import ApplicationServices
+import ServiceManagement
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
@@ -8,6 +9,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hasStartedMultitouch = false
     private var hasRequestedAccessibilityPrompt = false
     private var hasShownAccessibilityInstructions = false
+    private var settings: MouseToucherSettings?
+    private var settingsWindowController: SettingsWindowController?
     private var clickSequenceTracker = ClickSequenceTracker(
         doubleClickInterval: NSEvent.doubleClickInterval,
         maximumCursorMovement: 5.0
@@ -15,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeDrag: (button: CompoundTapButton, clickCount: Int64)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setupSettings()
         setupMenuBar()
 
         ensureAccessibilityAndStart()
@@ -25,7 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasShownAccessibilityInstructions = true
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "MouseToucher 1.5 needs accessibility permissions to simulate clicks.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 1.5. The app will begin working as soon as permission is granted."
+        alert.informativeText = "MouseToucher 1.6 needs accessibility permissions to simulate clicks.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 1.6. The app will begin working as soon as permission is granted."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Quit")
@@ -48,7 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 1.5")
+            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 1.6")
         }
 
         let menu = NSMenu()
@@ -58,16 +62,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(enabledItem)
 
         menu.addItem(NSMenuItem.separator())
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         let accessibilityItem = NSMenuItem(title: "Accessibility Instructions…", action: #selector(showAccessibilityInstructions), keyEquivalent: "")
         accessibilityItem.target = self
         menu.addItem(accessibilityItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "About MouseToucher 1.5", action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "About MouseToucher 1.6", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit MouseToucher 1.5", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit MouseToucher 1.6", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem?.menu = menu
+    }
+
+    @objc func showSettings() {
+        settingsWindowController?.showWindow(nil)
     }
 
     @objc func toggleEnabled() {
@@ -85,7 +97,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "MouseToucher 1.5"
+        alert.messageText = "MouseToucher 1.6"
         alert.informativeText = """
         Intentional tap-to-click for Magic Mouse
 
@@ -94,8 +106,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         • Tap the right side with another finger for right click
         • Repeat taps for double and multi-click
         • Place three fingers to drag immediately; lift all fingers to drop
+        • Tune gesture recognition in Settings
+        • Automatically use a preset for the current macOS version
 
-        Version 1.5
+        Version 1.6
 
         Uses private MultitouchSupport framework
         """
@@ -123,7 +137,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !hasStartedMultitouch else { return }
         hasStartedMultitouch = true
 
-        multitouchManager = MultitouchManager()
+        let configuration = settings?.activeConfiguration ?? .default
+        multitouchManager = MultitouchManager(configuration: configuration)
         multitouchManager?.onGestureRecognized = { [weak self] location, event in
             let handleEvent: () -> Void = {
                 self?.handleCompoundGesture(event, at: location)
@@ -135,7 +150,85 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async(execute: handleEvent)
             }
         }
+        multitouchManager?.onStatusChanged = { [weak self] status in
+            let updateStatus: () -> Void = {
+                self?.settingsWindowController?.updateStatus(status)
+            }
+
+            if Thread.isMainThread {
+                updateStatus()
+            } else {
+                DispatchQueue.main.async(execute: updateStatus)
+            }
+        }
         multitouchManager?.start()
+    }
+
+    private func setupSettings() {
+        let settings = MouseToucherSettings()
+        self.settings = settings
+
+        let controller = SettingsWindowController(
+            settings: settings,
+            launchAtLoginEnabled: isLaunchAtLoginEnabled,
+            launchAtLoginAvailable: isLaunchAtLoginAvailable
+        )
+        controller.onActiveConfigurationChanged = { [weak self] configuration in
+            self?.clickSequenceTracker.reset()
+            self?.multitouchManager?.updateConfiguration(configuration)
+        }
+        controller.onLaunchAtLoginChanged = { [weak self] enabled in
+            self?.setLaunchAtLogin(enabled) ?? false
+        }
+        settingsWindowController = controller
+    }
+
+    private var isLaunchAtLoginAvailable: Bool {
+        if #available(macOS 13.0, *) {
+            return true
+        }
+        return false
+    }
+
+    private var isLaunchAtLoginEnabled: Bool {
+        guard #available(macOS 13.0, *) else { return false }
+        switch SMAppService.mainApp.status {
+        case .enabled, .requiresApproval:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) -> Bool {
+        guard #available(macOS 13.0, *) else { return false }
+
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+
+            if enabled, SMAppService.mainApp.status == .requiresApproval {
+                let alert = NSAlert()
+                alert.messageText = "ログイン時の自動起動を許可してください"
+                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 1.6 を許可してください。"
+                alert.addButton(withTitle: "ログイン項目を開く")
+                alert.addButton(withTitle: "後で")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    SMAppService.openSystemSettingsLoginItems()
+                }
+            }
+            return true
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "自動起動の設定を変更できませんでした"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return false
+        }
     }
 
     private func requestAccessibilityPermissionIfNeeded() {

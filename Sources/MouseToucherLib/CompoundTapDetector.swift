@@ -6,6 +6,54 @@ enum CompoundTapButton: Equatable {
     case right
 }
 
+struct CompoundGestureConfiguration: Equatable {
+    static let defaultTapTimeThreshold: TimeInterval = 0.28
+    static let defaultMovementThreshold: CGFloat = 0.04
+    static let defaultRightClickSplit: CGFloat = 0.5
+
+    static let `default` = CompoundGestureConfiguration(
+        tapTimeThreshold: defaultTapTimeThreshold,
+        movementThreshold: defaultMovementThreshold,
+        rightClickSplit: defaultRightClickSplit,
+        isThreeFingerDragEnabled: true
+    )
+
+    var tapTimeThreshold: TimeInterval
+    var movementThreshold: CGFloat
+    var rightClickSplit: CGFloat
+    var isThreeFingerDragEnabled: Bool
+
+    var normalized: CompoundGestureConfiguration {
+        CompoundGestureConfiguration(
+            tapTimeThreshold: min(max(tapTimeThreshold, 0.10), 0.50),
+            movementThreshold: min(max(movementThreshold, 0.01), 0.12),
+            rightClickSplit: min(max(rightClickSplit, 0.35), 0.75),
+            isThreeFingerDragEnabled: isThreeFingerDragEnabled
+        )
+    }
+}
+
+enum CompoundGestureState: Equatable {
+    case idle
+    case anchorReady
+    case tapping
+    case dragging
+    case waitingForRelease
+}
+
+enum CompoundGestureCancellationReason: Equatable {
+    case anchorReleased
+    case anchorMoved
+    case tapMoved
+    case tapTooLong
+    case replacementTouch
+    case tooManyFingers
+    case threeFingerDragDisabled
+    case physicalButtonPressed
+    case disabled
+    case settingsChanged
+}
+
 struct CompoundTouch: Equatable {
     let identifier: Int32
     let position: CGPoint
@@ -31,9 +79,7 @@ enum CompoundGestureEvent: Equatable {
 /// consecutive clicks. Three simultaneous touches begin a left-button drag
 /// immediately; the drag ends only after every finger lifts.
 final class CompoundTapDetector {
-    let tapTimeThreshold: TimeInterval
-    let movementThreshold: CGFloat
-    let rightClickSplit: CGFloat
+    private(set) var configuration: CompoundGestureConfiguration
 
     private struct TrackedTouch {
         let identifier: Int32
@@ -47,21 +93,53 @@ final class CompoundTapDetector {
     private var canBeginTap = true
     private var requiresAllFingersReleased = false
     private(set) var activeDragButton: CompoundTapButton?
+    private(set) var lastCancellationReason: CompoundGestureCancellationReason?
+
+    var gestureState: CompoundGestureState {
+        if activeDragButton != nil {
+            return .dragging
+        }
+        if requiresAllFingersReleased {
+            return .waitingForRelease
+        }
+        if tappingFinger != nil {
+            return .tapping
+        }
+        if anchor != nil {
+            return .anchorReady
+        }
+        return .idle
+    }
+
+    var tapTimeThreshold: TimeInterval { configuration.tapTimeThreshold }
+    var movementThreshold: CGFloat { configuration.movementThreshold }
+    var rightClickSplit: CGFloat { configuration.rightClickSplit }
 
     init(
         tapTimeThreshold: TimeInterval = 0.28,
         movementThreshold: CGFloat = 0.04,
-        rightClickSplit: CGFloat = 0.5
+        rightClickSplit: CGFloat = 0.5,
+        isThreeFingerDragEnabled: Bool = true
     ) {
-        self.tapTimeThreshold = tapTimeThreshold
-        self.movementThreshold = movementThreshold
-        self.rightClickSplit = rightClickSplit
+        configuration = CompoundGestureConfiguration(
+            tapTimeThreshold: tapTimeThreshold,
+            movementThreshold: movementThreshold,
+            rightClickSplit: rightClickSplit,
+            isThreeFingerDragEnabled: isThreeFingerDragEnabled
+        ).normalized
+    }
+
+    init(configuration: CompoundGestureConfiguration) {
+        self.configuration = configuration.normalized
     }
 
     func process(touches: [CompoundTouch], timestamp: TimeInterval) -> CompoundGestureEvent? {
         if touches.isEmpty {
             let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
-            reset()
+            resetTracking()
+            if dragEnd != nil {
+                lastCancellationReason = nil
+            }
             return dragEnd
         }
 
@@ -72,6 +150,10 @@ final class CompoundTapDetector {
         }
 
         if touches.count >= 3 {
+            guard configuration.isThreeFingerDragEnabled else {
+                return invalidateUntilAllFingersAreReleased(reason: .threeFingerDragDisabled)
+            }
+
             let surfaceLocation = touches.reduce(CGPoint.zero) { partial, touch in
                 CGPoint(
                     x: partial.x + touch.position.x / CGFloat(touches.count),
@@ -84,6 +166,7 @@ final class CompoundTapDetector {
             canBeginTap = false
             requiresAllFingersReleased = false
             activeDragButton = .left
+            lastCancellationReason = nil
             return .dragBegan(CompoundTap(button: .left, surfaceLocation: surfaceLocation))
         }
 
@@ -91,7 +174,7 @@ final class CompoundTapDetector {
 
         guard let anchor else {
             guard touches.count == 1, let firstTouch = touches.first else {
-                return invalidateUntilAllFingersAreReleased()
+                return invalidateUntilAllFingersAreReleased(reason: .tooManyFingers)
             }
 
             self.anchor = TrackedTouch(
@@ -104,7 +187,9 @@ final class CompoundTapDetector {
 
         guard let currentAnchor = touches.first(where: { $0.identifier == anchor.identifier }) else {
             // Do not reinterpret the tapping finger as an anchor mid-gesture.
-            return invalidateUntilAllFingersAreReleased()
+            return invalidateUntilAllFingersAreReleased(
+                reason: tappingFinger == nil ? nil : .anchorReleased
+            )
         }
 
         let anchorMovedTooFar = distance(
@@ -117,12 +202,13 @@ final class CompoundTapDetector {
                 rebaseAnchor(to: currentAnchor, timestamp: timestamp)
             } else {
                 tappingFingerWasRejected = true
+                lastCancellationReason = .anchorMoved
             }
         }
 
         let secondaryTouches = touches.filter { $0.identifier != anchor.identifier }
         guard secondaryTouches.count <= 1 else {
-            return invalidateUntilAllFingersAreReleased()
+            return invalidateUntilAllFingersAreReleased(reason: .tooManyFingers)
         }
 
         guard let tappingFinger else {
@@ -143,10 +229,12 @@ final class CompoundTapDetector {
 
         if let currentTap = secondaryTouches.first(where: { $0.identifier == tappingFinger.identifier }) {
             let duration = timestamp - tappingFinger.startTime
-            if duration < 0 ||
-                duration > tapTimeThreshold ||
-                distance(from: tappingFinger.startPosition, to: currentTap.position) > movementThreshold {
+            if duration < 0 || duration > tapTimeThreshold {
                 tappingFingerWasRejected = true
+                lastCancellationReason = .tapTooLong
+            } else if distance(from: tappingFinger.startPosition, to: currentTap.position) > movementThreshold {
+                tappingFingerWasRejected = true
+                lastCancellationReason = .tapMoved
             }
             return nil
         }
@@ -157,6 +245,7 @@ final class CompoundTapDetector {
             self.tappingFinger = nil
             tappingFingerWasRejected = false
             canBeginTap = false
+            lastCancellationReason = .replacementTouch
             return nil
         }
 
@@ -172,20 +261,38 @@ final class CompoundTapDetector {
         guard !tappingFingerWasRejected,
               duration >= 0,
               duration <= tapTimeThreshold else {
+            if lastCancellationReason == nil {
+                lastCancellationReason = .tapTooLong
+            }
             return nil
         }
 
+        lastCancellationReason = nil
         return .click(makeTap(from: tappingFinger))
     }
 
     /// Cancels recognition and returns a matching mouse-up event if a drag is active.
-    func cancel() -> CompoundGestureEvent? {
+    func cancel(reason: CompoundGestureCancellationReason = .disabled) -> CompoundGestureEvent? {
         let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
-        reset()
+        resetTracking()
+        lastCancellationReason = reason
         return dragEnd
     }
 
+    func updateConfiguration(_ configuration: CompoundGestureConfiguration) -> CompoundGestureEvent? {
+        let normalized = configuration.normalized
+        guard normalized != self.configuration else { return nil }
+
+        self.configuration = normalized
+        return cancel(reason: .settingsChanged)
+    }
+
     func reset() {
+        resetTracking()
+        lastCancellationReason = nil
+    }
+
+    private func resetTracking() {
         anchor = nil
         tappingFinger = nil
         tappingFingerWasRejected = false
@@ -194,7 +301,9 @@ final class CompoundTapDetector {
         activeDragButton = nil
     }
 
-    private func invalidateUntilAllFingersAreReleased() -> CompoundGestureEvent? {
+    private func invalidateUntilAllFingersAreReleased(
+        reason: CompoundGestureCancellationReason?
+    ) -> CompoundGestureEvent? {
         let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
         anchor = nil
         tappingFinger = nil
@@ -202,6 +311,9 @@ final class CompoundTapDetector {
         canBeginTap = false
         requiresAllFingersReleased = true
         activeDragButton = nil
+        if let reason {
+            lastCancellationReason = reason
+        }
         return dragEnd
     }
 

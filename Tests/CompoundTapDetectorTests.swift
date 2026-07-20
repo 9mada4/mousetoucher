@@ -244,6 +244,90 @@ private func testReplacementFingerIsNotTreatedAsTapRelease() throws {
     try expectNil(detector.process(touches: [anchor], timestamp: 0.12))
 }
 
+private func testConfigurationValuesAreClamped() throws {
+    let detector = CompoundTapDetector(
+        tapTimeThreshold: 2.0,
+        movementThreshold: 0.0,
+        rightClickSplit: 0.9
+    )
+
+    try expectEqual(detector.configuration.tapTimeThreshold, 0.50)
+    try expectEqual(detector.configuration.movementThreshold, 0.01)
+    try expectEqual(detector.configuration.rightClickSplit, 0.75)
+}
+
+private func testCustomRightClickSplitIsApplied() throws {
+    let detector = CompoundTapDetector(rightClickSplit: 0.7)
+    let tappingFinger = touch(identifier: 2, x: 0.6)
+
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
+    try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
+    try expectEqual(
+        detector.process(touches: [anchor], timestamp: 0.10),
+        .click(CompoundTap(button: .left, surfaceLocation: tappingFinger.position))
+    )
+}
+
+private func testDisabledThreeFingerDragReportsReason() throws {
+    let detector = CompoundTapDetector(isThreeFingerDragEnabled: false)
+    let secondFinger = touch(identifier: 2, x: 0.25)
+    let thirdFinger = touch(identifier: 3, x: 0.75)
+
+    try expectNil(
+        detector.process(touches: [anchor, secondFinger, thirdFinger], timestamp: 0.00)
+    )
+    try expectEqual(detector.gestureState, .waitingForRelease)
+    try expectEqual(detector.lastCancellationReason, .threeFingerDragDisabled)
+    try expectNil(detector.process(touches: [], timestamp: 0.05))
+    try expectEqual(detector.gestureState, .idle)
+}
+
+private func testConfigurationChangeEndsActiveDrag() throws {
+    let detector = makeDetector()
+    let secondFinger = touch(identifier: 2, x: 0.25)
+    let thirdFinger = touch(identifier: 3, x: 0.75)
+
+    try expectEqual(
+        detector.process(touches: [anchor, secondFinger, thirdFinger], timestamp: 0.00),
+        .dragBegan(CompoundTap(button: .left, surfaceLocation: CGPoint(x: 0.5, y: 0.5)))
+    )
+
+    var changed = CompoundGestureConfiguration.default
+    changed.tapTimeThreshold = 0.35
+    try expectEqual(detector.updateConfiguration(changed), .dragEnded(.left))
+    try expectEqual(detector.lastCancellationReason, .settingsChanged)
+    try expectEqual(detector.gestureState, .idle)
+}
+
+private func testOSPresetsFollowCurrentSystemVersion() throws {
+    let suiteName = "com.mousetoucher.tests.\(UUID().uuidString)"
+    guard let defaults = UserDefaults(suiteName: suiteName) else {
+        throw TestFailure(description: "Could not create isolated defaults")
+    }
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    let settings = MouseToucherSettings(defaults: defaults, currentOSVersion: "26.5.2")
+    try expectEqual(settings.presetVersions, ["26.5.2"])
+
+    try expectEqual(settings.addPreset(version: "27.0.0", copying: "26.5.2"), true)
+    var futureConfiguration = CompoundGestureConfiguration.default
+    futureConfiguration.tapTimeThreshold = 0.42
+    futureConfiguration.isThreeFingerDragEnabled = false
+    try expectEqual(
+        settings.updateConfiguration(futureConfiguration, for: "27.0.0"),
+        false
+    )
+    try expectEqual(settings.setDefaultPreset(version: "27.0.0"), true)
+
+    let afterUpgrade = MouseToucherSettings(defaults: defaults, currentOSVersion: "28.0.0")
+    try expectEqual(afterUpgrade.activeConfiguration, futureConfiguration)
+    try expectEqual(afterUpgrade.presetVersions, ["26.5.2", "27.0.0", "28.0.0"])
+
+    let applied = afterUpgrade.applyPresetToCurrentOS(version: "26.5.2")
+    try expectEqual(applied, CompoundGestureConfiguration.default)
+    try expectEqual(afterUpgrade.activeConfiguration, .default)
+}
+
 private func testConsecutiveClicksIncrementClickCount() throws {
     var tracker = ClickSequenceTracker(doubleClickInterval: 0.5)
     let location = CGPoint(x: 100, y: 100)
@@ -309,6 +393,11 @@ private enum CompoundTapTestRunner {
             ("anchor release cancels tap", testReleasingAnchorBeforeTappingFingerDoesNotClick),
             ("three fingers begin drag immediately", testThreeFingerContactBeginsDragImmediately),
             ("replacement finger is rejected", testReplacementFingerIsNotTreatedAsTapRelease),
+            ("configuration values are clamped", testConfigurationValuesAreClamped),
+            ("custom right-click split is applied", testCustomRightClickSplitIsApplied),
+            ("disabled drag reports its reason", testDisabledThreeFingerDragReportsReason),
+            ("configuration change ends drag", testConfigurationChangeEndsActiveDrag),
+            ("OS presets follow the current version", testOSPresetsFollowCurrentSystemVersion),
             ("click count increments", testConsecutiveClicksIncrementClickCount),
             ("button change resets click count", testDifferentButtonStartsNewSequence),
             ("expired interval resets click count", testExpiredIntervalStartsNewSequence),

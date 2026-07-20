@@ -2,7 +2,7 @@
 
 # Build script for Mouse Toucher app (Production)
 
-APP_NAME="MouseToucher 1.5"
+APP_NAME="MouseToucher 1.6"
 BUILD_DIR="build"
 APP_PATH="$BUILD_DIR/$APP_NAME.app"
 
@@ -25,11 +25,14 @@ swiftc -o "$BUILD_DIR/${APP_NAME}_arm64" \
     -import-objc-header MultitouchBridge.h \
     -framework Cocoa \
     -framework ApplicationServices \
+    -framework ServiceManagement \
     -F /System/Library/PrivateFrameworks \
     -framework MultitouchSupport \
     -Xlinker -rpath -Xlinker /System/Library/PrivateFrameworks \
     Sources/MouseToucherLib/CompoundTapDetector.swift \
+    MouseToucherSettings.swift \
     MultitouchManager.swift \
+    SettingsWindowController.swift \
     AppDelegate.swift \
     main.swift
 
@@ -45,11 +48,14 @@ swiftc -o "$BUILD_DIR/${APP_NAME}_x86_64" \
     -import-objc-header MultitouchBridge.h \
     -framework Cocoa \
     -framework ApplicationServices \
+    -framework ServiceManagement \
     -F /System/Library/PrivateFrameworks \
     -framework MultitouchSupport \
     -Xlinker -rpath -Xlinker /System/Library/PrivateFrameworks \
     Sources/MouseToucherLib/CompoundTapDetector.swift \
+    MouseToucherSettings.swift \
     MultitouchManager.swift \
+    SettingsWindowController.swift \
     AppDelegate.swift \
     main.swift
 

@@ -2,21 +2,37 @@ import Foundation
 import CoreGraphics
 import AppKit
 
+enum RecognizedGesture: Equatable {
+    case none
+    case leftClick
+    case rightClick
+    case dragStarted
+    case dropped
+}
+
+struct GestureStatusSnapshot: Equatable {
+    let touchCount: Int
+    let state: CompoundGestureState
+    let lastRecognizedGesture: RecognizedGesture
+    let cancellationReason: CompoundGestureCancellationReason?
+}
+
 // Swift wrapper for Multitouch framework
 class MultitouchManager {
     private var devices: [MTDeviceRef] = []
-    private var compoundTapDetector = CompoundTapDetector(
-        tapTimeThreshold: 0.28,
-        movementThreshold: 0.04,
-        rightClickSplit: 0.5
-    )
+    private let stateLock = NSLock()
+    private var compoundTapDetector: CompoundTapDetector
     private var isEnabled = true
+    private var lastRecognizedGesture: RecognizedGesture = .none
+    private var lastStatusSnapshot: GestureStatusSnapshot?
 
     fileprivate static var sharedInstance: MultitouchManager?
 
     var onGestureRecognized: ((CGPoint, CompoundGestureEvent) -> Void)?
+    var onStatusChanged: ((GestureStatusSnapshot) -> Void)?
 
-    init() {
+    init(configuration: CompoundGestureConfiguration = .default) {
+        compoundTapDetector = CompoundTapDetector(configuration: configuration)
         MultitouchManager.sharedInstance = self
     }
 
@@ -43,7 +59,7 @@ class MultitouchManager {
     }
 
     func stop() {
-        cancelGesture()
+        cancelGesture(reason: .disabled, touchCount: 0)
         for device in devices {
             MTUnregisterContactFrameCallback(device, touchCallback)
             MTDeviceStop(device)
@@ -52,15 +68,50 @@ class MultitouchManager {
     }
 
     func setEnabled(_ enabled: Bool) {
+        stateLock.lock()
         isEnabled = enabled
-        if !enabled {
-            cancelGesture()
+        let event: CompoundGestureEvent?
+        if enabled {
+            compoundTapDetector.reset()
+            event = nil
+        } else {
+            event = compoundTapDetector.cancel(reason: .disabled)
         }
+        if let event {
+            lastRecognizedGesture = recognizedGesture(for: event)
+        }
+        let status = makeStatus(touchCount: 0)
+        stateLock.unlock()
+
+        if let event {
+            emit(event)
+        }
+        publish(status)
+    }
+
+    func updateConfiguration(_ configuration: CompoundGestureConfiguration) {
+        stateLock.lock()
+        let event = compoundTapDetector.updateConfiguration(configuration)
+        if let event {
+            lastRecognizedGesture = recognizedGesture(for: event)
+        }
+        let status = makeStatus(touchCount: 0)
+        stateLock.unlock()
+
+        if let event {
+            emit(event)
+        }
+        publish(status)
     }
 
     func processTouches(_ touches: [CompoundTouch], timestamp: Double) {
-        guard isEnabled else {
-            cancelGesture()
+        stateLock.lock()
+        let enabled = isEnabled
+        let dragIsActive = compoundTapDetector.activeDragButton != nil
+        stateLock.unlock()
+
+        guard enabled else {
+            cancelGesture(reason: .disabled, touchCount: touches.count)
             return
         }
 
@@ -68,25 +119,74 @@ class MultitouchManager {
             CGEventSource.buttonState(.hidSystemState, button: .left) ||
             CGEventSource.buttonState(.hidSystemState, button: .right)
 
-        if physicalButtonIsPressed && compoundTapDetector.activeDragButton == nil {
-            cancelGesture()
+        if physicalButtonIsPressed && !dragIsActive {
+            cancelGesture(reason: .physicalButtonPressed, touchCount: touches.count)
             return
         }
 
-        if let event = compoundTapDetector.process(touches: touches, timestamp: timestamp) {
+        stateLock.lock()
+        let event = compoundTapDetector.process(touches: touches, timestamp: timestamp)
+        if let event {
+            lastRecognizedGesture = recognizedGesture(for: event)
+        }
+        let status = makeStatus(touchCount: touches.count)
+        stateLock.unlock()
+
+        if let event {
             emit(event)
         }
+        publish(status)
     }
 
-    private func cancelGesture() {
-        if let event = compoundTapDetector.cancel() {
+    private func cancelGesture(reason: CompoundGestureCancellationReason, touchCount: Int) {
+        stateLock.lock()
+        let event = compoundTapDetector.cancel(reason: reason)
+        if let event {
+            lastRecognizedGesture = recognizedGesture(for: event)
+        }
+        let status = makeStatus(touchCount: touchCount)
+        stateLock.unlock()
+
+        if let event {
             emit(event)
         }
+        publish(status)
     }
 
     private func emit(_ event: CompoundGestureEvent) {
         let cursorLocation = CGEvent(source: nil)?.location ?? CGPoint.zero
         onGestureRecognized?(cursorLocation, event)
+    }
+
+    private func makeStatus(touchCount: Int) -> GestureStatusSnapshot {
+        GestureStatusSnapshot(
+            touchCount: touchCount,
+            state: compoundTapDetector.gestureState,
+            lastRecognizedGesture: lastRecognizedGesture,
+            cancellationReason: compoundTapDetector.lastCancellationReason
+        )
+    }
+
+    private func publish(_ status: GestureStatusSnapshot) {
+        stateLock.lock()
+        guard status != lastStatusSnapshot else {
+            stateLock.unlock()
+            return
+        }
+        lastStatusSnapshot = status
+        stateLock.unlock()
+        onStatusChanged?(status)
+    }
+
+    private func recognizedGesture(for event: CompoundGestureEvent) -> RecognizedGesture {
+        switch event {
+        case .click(let tap):
+            return tap.button == .left ? .leftClick : .rightClick
+        case .dragBegan:
+            return .dragStarted
+        case .dragEnded:
+            return .dropped
+        }
     }
 
     deinit {

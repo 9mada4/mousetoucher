@@ -16,10 +16,13 @@ The suite currently checks:
 - anchor plus a left- or right-side tap produces the correct button
 - the same anchor can remain down, drift, and be reused for consecutive clicks
 - three fingers begin a drag immediately and lifting every finger ends the drag
+- disabling three-finger drag rejects the gesture and reports the reason
+- adjustable thresholds and the left/right boundary are applied correctly
 - finger movement or partial contact loss does not interrupt an active drag
 - cancelling or disabling always releases an active drag
-- finger movement, anchor movement, replacement touches, and a third finger are rejected
+- finger movement, anchor movement, and replacement touches are rejected with a visible reason
 - invalid gestures require a clean release before recognition resumes
+- OS-version presets persist, follow the detected system version, and use the chosen default after an OS change
 - consecutive click counts increment for double- and multi-clicks
 - changing the button, waiting too long, moving the cursor, or resetting starts a new click sequence
 
@@ -37,11 +40,16 @@ Build the complete universal macOS application:
 ./build.sh
 ```
 
-The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 1.5.app`, and applies an ad-hoc signature.
+The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 1.6.app`, and applies an ad-hoc signature.
 
 ## Manual Magic Mouse checklist
 
 - The menu-bar icon appears and the enable/disable control works.
+- The Settings window opens and changes are saved without rebuilding.
+- The displayed current macOS version matches `sw_vers`, and its exact preset is marked as current.
+- Adding an arbitrary past or future OS preset, marking it as default, and applying it to the current OS all work.
+- The live status updates touch count, gesture state, recognized operation, and cancellation reason.
+- The launch-at-login switch registers and unregisters the app on macOS 13 or later.
 - A single finger resting, tapping, or scrolling does not click.
 - Hold one finger still and tap the left half with a second finger: one left-click occurs.
 - Hold one finger still and tap the right half with a second finger: one right-click occurs.
@@ -49,7 +57,7 @@ The application build compiles both Apple Silicon and Intel binaries, combines t
 - Place three fingers, move the mouse immediately, then lift every finger: the item follows and drops.
 - Moving either finger during a two-finger click cancels only that click; the anchor can stay down for another attempt.
 - Finger movement or partial contact loss after a three-finger drag begins does not release the dragged item.
-- Adding a third finger cancels the gesture.
+- Adding a third finger begins a drag when three-finger drag is enabled.
 - Pressing the physical mouse button cancels the gesture but still performs the normal physical click.
 - Disabling compound tap prevents synthesized clicks immediately.
 - Quitting and relaunching the installed application preserves Accessibility permission.
