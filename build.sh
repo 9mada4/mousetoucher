@@ -2,9 +2,11 @@
 
 # Build script for Mouse Toucher app (Production)
 
-APP_NAME="MouseToucher 1.6"
+APP_NAME="MouseToucher 1.7"
 BUILD_DIR="build"
 APP_PATH="$BUILD_DIR/$APP_NAME.app"
+ICON_SOURCE="Assets/AppIcon.png"
+ICONSET_PATH="$BUILD_DIR/AppIcon.iconset"
 
 echo "=========================================="
 echo "Building Mouse Toucher (Universal Binary)"
@@ -17,6 +19,27 @@ mkdir -p "$BUILD_DIR"
 # Create app bundle structure
 mkdir -p "$APP_PATH/Contents/MacOS"
 mkdir -p "$APP_PATH/Contents/Resources"
+
+# Generate the full macOS icon set from the checked-in 1024px+ source image.
+if [ ! -f "$ICON_SOURCE" ]; then
+    echo "❌ App icon source is missing: $ICON_SOURCE"
+    exit 1
+fi
+
+rm -rf "$ICONSET_PATH"
+mkdir -p "$ICONSET_PATH"
+sips -z 16 16 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_16x16.png" >/dev/null
+sips -z 32 32 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_16x16@2x.png" >/dev/null
+sips -z 32 32 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_32x32.png" >/dev/null
+sips -z 64 64 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_32x32@2x.png" >/dev/null
+sips -z 128 128 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_128x128.png" >/dev/null
+sips -z 256 256 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_128x128@2x.png" >/dev/null
+sips -z 256 256 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_256x256.png" >/dev/null
+sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_256x256@2x.png" >/dev/null
+sips -z 512 512 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_512x512.png" >/dev/null
+sips -z 1024 1024 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_512x512@2x.png" >/dev/null
+iconutil -c icns "$ICONSET_PATH" -o "$APP_PATH/Contents/Resources/AppIcon.icns"
+rm -rf "$ICONSET_PATH"
 
 # Compile for Apple Silicon (arm64)
 echo "📦 Compiling for Apple Silicon (arm64)..."

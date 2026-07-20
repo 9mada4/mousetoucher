@@ -40,11 +40,12 @@ Build the complete universal macOS application:
 ./build.sh
 ```
 
-The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 1.6.app`, and applies an ad-hoc signature.
+The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 1.7.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
 
 ## Manual Magic Mouse checklist
 
 - The menu-bar icon appears and the enable/disable control works.
+- Finder and Accessibility settings show the MouseToucher app icon rather than a generic application icon.
 - The Settings window opens and changes are saved without rebuilding.
 - The displayed current macOS version matches `sw_vers`, and its exact preset is marked as current.
 - Adding an arbitrary past or future OS preset, marking it as default, and applying it to the current OS all work.

@@ -6,7 +6,7 @@
   <img alt="Mouse Toucher Logo" src="mousetoucher-light.png">
 </picture>
 
-**Intentional tap-to-click and drag for your Apple Magic Mouse.** (v1.6)
+**Intentional tap-to-click and drag for your Apple Magic Mouse.** (v1.7)
 
 Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse. Keep one finger still as an anchor, then tap with another finger to click without pressing the mouse surface down. A single resting finger never clicks by itself.
 
@@ -22,6 +22,7 @@ Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse.
 - 🧩 **macOS-version presets** automatically select the exact preset for the running OS
 - 📊 **Live status** shows touch count, recognition state, last gesture, and cancellation reason
 - 🚀 **Launch at login** can be controlled from the app on macOS 13 or later
+- 🎨 **Native macOS app icon** is embedded at every standard Retina size
 - 🔒 **Privacy-focused** - runs entirely on your Mac, no network access
 
 ## 📋 Requirements
@@ -41,7 +42,7 @@ A universal binary (works on both Apple Silicon and Intel Macs) is included in t
 cd /path/to/mousetoucher
 
 # Copy to Applications
-cp -r "build/MouseToucher 1.6.app" /Applications/
+cp -r "build/MouseToucher 1.7.app" /Applications/
 ```
 
 ### Option 2: Build From Source
@@ -51,16 +52,16 @@ If you prefer to build it yourself:
 ```bash
 cd /path/to/mousetoucher
 ./build.sh   # Builds and ad-hoc codesigns the app so Accessibility permissions stick
-cp -r "build/MouseToucher 1.6.app" /Applications/
+cp -r "build/MouseToucher 1.7.app" /Applications/
 ```
 
 ### Grant Permissions
 
-1. Open **MouseToucher 1.6** from your Applications folder
+1. Open **MouseToucher 1.7** from your Applications folder
 2. You'll see a permission request - click **"Open System Settings"**
-3. In **Privacy & Security → Accessibility**, enable **MouseToucher 1.6** ✓
-   - If the app is missing, click the **+** button and add it from `/Applications/MouseToucher 1.6.app`
-4. Return to MouseToucher 1.6 – it will begin working automatically once the toggle is on (no relaunch needed)
+3. In **Privacy & Security → Accessibility**, enable **MouseToucher 1.7** ✓
+   - If the app is missing, click the **+** button and add it from `/Applications/MouseToucher 1.7.app`
+4. Return to MouseToucher 1.7 – it will begin working automatically once the toggle is on (no relaunch needed)
 
 That's it! You'll see a mouse icon in your menu bar.
 
@@ -122,7 +123,7 @@ On macOS 13 or later:
 
 1. Open **Settings** from the MouseToucher menu-bar icon
 2. Turn on **Launch at login**
-3. If macOS asks for approval, allow **MouseToucher 1.6** in **System Settings → General → Login Items**
+3. If macOS asks for approval, allow **MouseToucher 1.7** in **System Settings → General → Login Items**
 
 The same switch removes the login item when turned off.
 
@@ -156,8 +157,8 @@ These permissions are granted by you in System Settings and can be revoked at an
 
 **Check permissions:**
 1. Go to **System Settings → Privacy & Security → Accessibility**
-2. Make sure **MouseToucher 1.6** is in the list and **checked** ✓
-3. If it disappeared (after rebuilding), click **+** and re-add `/Applications/MouseToucher 1.6.app`
+2. Make sure **MouseToucher 1.7** is in the list and **checked** ✓
+3. If it disappeared (after rebuilding), click **+** and re-add `/Applications/MouseToucher 1.7.app`
 4. Toggle the checkbox off/on once — the app will detect the change immediately
 
 **Verify Magic Mouse:**
@@ -169,7 +170,7 @@ These permissions are granted by you in System Settings and can be revoked at an
 
 **"App is damaged" error:**
 - This is normal for apps not from the App Store
-- Right-click MouseToucher 1.6 → **Open** → Click **Open** again in the dialog
+- Right-click MouseToucher 1.7 → **Open** → Click **Open** again in the dialog
 - Or: Go to **System Settings → Privacy & Security** and click **Open Anyway**
 
 ### Adjusting sensitivity
@@ -182,13 +183,13 @@ To remove MouseToucher:
 
 ```bash
 # Remove the app
-trash "/Applications/MouseToucher 1.6.app"
+trash "/Applications/MouseToucher 1.7.app"
 
 # Remove from Login Items (if you added it)
 # Or turn off Launch at login in MouseToucher Settings before removing the app
 
 # Revoke permissions (optional)
-# System Settings → Privacy & Security → Accessibility → Remove MouseToucher 1.6
+# System Settings → Privacy & Security → Accessibility → Remove MouseToucher 1.7
 ```
 
 ## 💬 Feedback & Support

@@ -29,7 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasShownAccessibilityInstructions = true
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "MouseToucher 1.6 needs accessibility permissions to simulate clicks.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 1.6. The app will begin working as soon as permission is granted."
+        alert.informativeText = "MouseToucher 1.7 needs accessibility permissions to simulate clicks.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 1.7. The app will begin working as soon as permission is granted."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Quit")
@@ -52,7 +52,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 1.6")
+            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 1.7")
         }
 
         let menu = NSMenu()
@@ -71,9 +71,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(accessibilityItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "About MouseToucher 1.6", action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "About MouseToucher 1.7", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit MouseToucher 1.6", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit MouseToucher 1.7", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem?.menu = menu
     }
@@ -97,7 +97,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "MouseToucher 1.6"
+        alert.messageText = "MouseToucher 1.7"
         alert.informativeText = """
         Intentional tap-to-click for Magic Mouse
 
@@ -109,7 +109,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         • Tune gesture recognition in Settings
         • Automatically use a preset for the current macOS version
 
-        Version 1.6
+        Version 1.7
 
         Uses private MultitouchSupport framework
         """
@@ -213,7 +213,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if enabled, SMAppService.mainApp.status == .requiresApproval {
                 let alert = NSAlert()
                 alert.messageText = "ログイン時の自動起動を許可してください"
-                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 1.6 を許可してください。"
+                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 1.7 を許可してください。"
                 alert.addButton(withTitle: "ログイン項目を開く")
                 alert.addButton(withTitle: "後で")
                 if alert.runModal() == .alertFirstButtonReturn {
