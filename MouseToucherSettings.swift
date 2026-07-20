@@ -6,6 +6,10 @@ struct OSGesturePreset: Codable, Equatable {
     var movementThreshold: Double
     var rightClickSplit: Double
     var isThreeFingerDragEnabled: Bool
+    // Optional for backward-compatible decoding of presets saved by v1.6-v1.8.
+    var isPinchZoomEnabled: Bool?
+    var pinchStartThreshold: Double?
+    var pinchSensitivity: Double?
 
     init(osVersion: String, configuration: CompoundGestureConfiguration) {
         self.osVersion = osVersion
@@ -13,6 +17,9 @@ struct OSGesturePreset: Codable, Equatable {
         movementThreshold = Double(configuration.movementThreshold)
         rightClickSplit = Double(configuration.rightClickSplit)
         isThreeFingerDragEnabled = configuration.isThreeFingerDragEnabled
+        isPinchZoomEnabled = configuration.isPinchZoomEnabled
+        pinchStartThreshold = Double(configuration.pinchStartThreshold)
+        pinchSensitivity = Double(configuration.pinchSensitivity)
     }
 
     var configuration: CompoundGestureConfiguration {
@@ -20,7 +27,14 @@ struct OSGesturePreset: Codable, Equatable {
             tapTimeThreshold: tapTimeThreshold,
             movementThreshold: CGFloat(movementThreshold),
             rightClickSplit: CGFloat(rightClickSplit),
-            isThreeFingerDragEnabled: isThreeFingerDragEnabled
+            isThreeFingerDragEnabled: isThreeFingerDragEnabled,
+            isPinchZoomEnabled: isPinchZoomEnabled ?? true,
+            pinchStartThreshold: CGFloat(
+                pinchStartThreshold ?? Double(CompoundGestureConfiguration.defaultPinchStartThreshold)
+            ),
+            pinchSensitivity: CGFloat(
+                pinchSensitivity ?? Double(CompoundGestureConfiguration.defaultPinchSensitivity)
+            )
         ).normalized
     }
 }

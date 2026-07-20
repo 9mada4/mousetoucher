@@ -1,6 +1,7 @@
 import CoreGraphics
 import Darwin
 import Foundation
+import AppKit
 
 private struct TestFailure: Error, CustomStringConvertible {
     let description: String
@@ -20,6 +21,21 @@ private func expectEqual<T: Equatable>(
 private func expectNil<T>(_ value: T?, _ message: String = "Expected nil") throws {
     guard value == nil else {
         throw TestFailure(description: message)
+    }
+}
+
+private func expectMagnification(
+    _ event: CompoundGestureEvent?,
+    phase: CompoundMagnificationPhase,
+    amount: CGFloat,
+    tolerance: CGFloat = 0.000_001
+) throws {
+    guard case .magnify(let magnification) = event else {
+        throw TestFailure(description: "Expected magnification event, got \(String(describing: event))")
+    }
+    try expectEqual(magnification.phase, phase)
+    guard abs(magnification.amount - amount) <= tolerance else {
+        throw TestFailure(description: "Expected magnification \(amount), got \(magnification.amount)")
     }
 }
 
@@ -177,7 +193,7 @@ private func testAnchorCanDriftBetweenTapsWithoutBeingLifted() throws {
 private func testMovingTappingFingerIsRejected() throws {
     let detector = makeDetector()
     let tappingFinger = touch(identifier: 2, x: 0.25)
-    let movedFinger = touch(identifier: 2, x: 0.30)
+    let movedFinger = touch(identifier: 2, x: 0.25, y: 0.55)
 
     try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
     try expectNil(detector.process(touches: [anchor, tappingFinger], timestamp: 0.05))
@@ -194,7 +210,7 @@ private func testMovingTappingFingerIsRejected() throws {
 
 private func testMovingAnchorDuringTapRejectsOnlyThatTap() throws {
     let detector = makeDetector()
-    let movedAnchor = touch(identifier: 1, x: 0.55)
+    let movedAnchor = touch(identifier: 1, x: 0.5, y: 0.55)
     let tappingFinger = touch(identifier: 2, x: 0.25)
 
     try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
@@ -248,12 +264,16 @@ private func testConfigurationValuesAreClamped() throws {
     let detector = CompoundTapDetector(
         tapTimeThreshold: 2.0,
         movementThreshold: 0.0,
-        rightClickSplit: 0.9
+        rightClickSplit: 0.9,
+        pinchStartThreshold: 0.5,
+        pinchSensitivity: 10.0
     )
 
     try expectEqual(detector.configuration.tapTimeThreshold, 0.50)
     try expectEqual(detector.configuration.movementThreshold, 0.01)
     try expectEqual(detector.configuration.rightClickSplit, 0.75)
+    try expectEqual(detector.configuration.pinchStartThreshold, 0.08)
+    try expectEqual(detector.configuration.pinchSensitivity, 3.0)
 }
 
 private func testCustomRightClickSplitIsApplied() throws {
@@ -313,6 +333,7 @@ private func testOSPresetsFollowCurrentSystemVersion() throws {
     var futureConfiguration = CompoundGestureConfiguration.default
     futureConfiguration.tapTimeThreshold = 0.42
     futureConfiguration.isThreeFingerDragEnabled = false
+    futureConfiguration.pinchSensitivity = 2.25
     try expectEqual(
         settings.updateConfiguration(futureConfiguration, for: "27.0.0"),
         false
@@ -326,6 +347,117 @@ private func testOSPresetsFollowCurrentSystemVersion() throws {
     let applied = afterUpgrade.applyPresetToCurrentOS(version: "26.5.2")
     try expectEqual(applied, CompoundGestureConfiguration.default)
     try expectEqual(afterUpgrade.activeConfiguration, .default)
+}
+
+private func testPinchProducesContinuousMagnification() throws {
+    let detector = makeDetector()
+    let secondFinger = touch(identifier: 2, x: 0.70)
+    let expandedFinger = touch(identifier: 2, x: 0.73)
+    let expandedAgain = touch(identifier: 2, x: 0.74)
+
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
+    try expectNil(detector.process(touches: [anchor, secondFinger], timestamp: 0.05))
+    try expectEqual(
+        detector.process(touches: [anchor, expandedFinger], timestamp: 0.08),
+        .magnify(CompoundMagnification(phase: .began, amount: 0.08))
+    )
+    try expectEqual(detector.gestureState, .pinching)
+    try expectMagnification(
+        detector.process(touches: [anchor, expandedAgain], timestamp: 0.10),
+        phase: .changed,
+        amount: 0.05
+    )
+    try expectEqual(
+        detector.process(touches: [anchor], timestamp: 0.12),
+        .magnify(CompoundMagnification(phase: .ended, amount: 0))
+    )
+    try expectEqual(detector.gestureState, .anchorReady)
+}
+
+private func testPinchContractionProducesZoomOut() throws {
+    let detector = makeDetector()
+    let secondFinger = touch(identifier: 2, x: 0.75)
+    let contractedFinger = touch(identifier: 2, x: 0.71)
+
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
+    try expectNil(detector.process(touches: [anchor, secondFinger], timestamp: 0.05))
+    try expectEqual(
+        detector.process(touches: [anchor, contractedFinger], timestamp: 0.08),
+        .magnify(CompoundMagnification(phase: .began, amount: -0.08))
+    )
+}
+
+private func testSimultaneousTouchesCanPinchButNeverClick() throws {
+    let detector = makeDetector()
+    let firstFinger = touch(identifier: 1, x: 0.35)
+    let secondFinger = touch(identifier: 2, x: 0.65)
+    let expandedFinger = touch(identifier: 2, x: 0.68)
+
+    try expectNil(detector.process(touches: [firstFinger, secondFinger], timestamp: 0.00))
+    try expectEqual(
+        detector.process(touches: [firstFinger, expandedFinger], timestamp: 0.03),
+        .magnify(CompoundMagnification(phase: .began, amount: 0.08))
+    )
+    try expectEqual(
+        detector.process(touches: [firstFinger], timestamp: 0.06),
+        .magnify(CompoundMagnification(phase: .ended, amount: 0))
+    )
+
+    let freshDetector = makeDetector()
+    try expectNil(freshDetector.process(touches: [firstFinger, secondFinger], timestamp: 0.00))
+    try expectNil(freshDetector.process(touches: [firstFinger], timestamp: 0.06))
+}
+
+private func testDisabledPinchFallsBackToTapRejection() throws {
+    let detector = CompoundTapDetector(isPinchZoomEnabled: false)
+    let secondFinger = touch(identifier: 2, x: 0.70)
+    let movedFinger = touch(identifier: 2, x: 0.75)
+
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
+    try expectNil(detector.process(touches: [anchor, secondFinger], timestamp: 0.05))
+    try expectNil(detector.process(touches: [anchor, movedFinger], timestamp: 0.08))
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.10))
+    try expectEqual(detector.lastCancellationReason, .tapMoved)
+}
+
+private func testCancellingPinchEmitsEndedEvent() throws {
+    let detector = makeDetector()
+    let secondFinger = touch(identifier: 2, x: 0.70)
+    let expandedFinger = touch(identifier: 2, x: 0.73)
+
+    try expectNil(detector.process(touches: [anchor], timestamp: 0.00))
+    try expectNil(detector.process(touches: [anchor, secondFinger], timestamp: 0.05))
+    try expectEqual(
+        detector.process(touches: [anchor, expandedFinger], timestamp: 0.08),
+        .magnify(CompoundMagnification(phase: .began, amount: 0.08))
+    )
+    try expectEqual(
+        detector.cancel(reason: .disabled),
+        .magnify(CompoundMagnification(phase: .ended, amount: 0))
+    )
+    try expectNil(detector.cancel(reason: .disabled))
+}
+
+private func testNativeMagnificationEventShape() throws {
+    let cases: [(CompoundMagnificationPhase, NSEvent.Phase)] = [
+        (.began, .began),
+        (.changed, .changed),
+        (.ended, .ended)
+    ]
+
+    for (phase, expectedPhase) in cases {
+        guard let cgEvent = NativeMagnificationEventFactory.makeEvent(
+            phase: phase,
+            amount: 0.03125,
+            location: CGPoint(x: 100, y: 200)
+        ), let event = NSEvent(cgEvent: cgEvent) else {
+            throw TestFailure(description: "Could not create native magnification event")
+        }
+
+        try expectEqual(event.type, .magnify)
+        try expectEqual(event.phase, expectedPhase)
+        try expectEqual(event.magnification, 0.03125)
+    }
 }
 
 private func testDragMotionUsesContinuousDraggedEventTypes() throws {
@@ -411,6 +543,12 @@ private enum CompoundTapTestRunner {
             ("disabled drag reports its reason", testDisabledThreeFingerDragReportsReason),
             ("configuration change ends drag", testConfigurationChangeEndsActiveDrag),
             ("OS presets follow the current version", testOSPresetsFollowCurrentSystemVersion),
+            ("pinch produces continuous magnification", testPinchProducesContinuousMagnification),
+            ("pinch contraction zooms out", testPinchContractionProducesZoomOut),
+            ("simultaneous touches can only pinch", testSimultaneousTouchesCanPinchButNeverClick),
+            ("disabled pinch rejects movement", testDisabledPinchFallsBackToTapRejection),
+            ("cancelling pinch emits end", testCancellingPinchEmitsEndedEvent),
+            ("native magnification event shape", testNativeMagnificationEventShape),
             ("drag motion uses dragged event types", testDragMotionUsesContinuousDraggedEventTypes),
             ("click count increments", testConsecutiveClicksIncrementClickCount),
             ("button change resets click count", testDifferentButtonStartsNewSequence),

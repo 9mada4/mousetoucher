@@ -11,10 +11,8 @@ enum DragMotionEventMapper {
     }
 }
 
-/// Converts physical mouse-move events into dragged events while a synthetic
-/// button is held. Newer macOS versions do not reliably perform this conversion
-/// from a synthetic mouse-down alone, which otherwise leaves windows at the
-/// initial position until mouse-up.
+/// Converts physical mouse movement during drag and suppresses the ordinary
+/// scroll events Magic Mouse may emit while MouseToucher is recognizing pinch.
 final class DragEventMonitor {
     private struct ActiveDrag {
         let button: CompoundTapButton
@@ -23,6 +21,7 @@ final class DragEventMonitor {
 
     private let stateLock = NSLock()
     private var activeDrag: ActiveDrag?
+    private var suppressesScroll = false
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
@@ -30,12 +29,14 @@ final class DragEventMonitor {
     func start() -> Bool {
         guard eventTap == nil else { return true }
 
-        let mouseMovedMask = CGEventMask(1) << CGEventType.mouseMoved.rawValue
+        let eventMask =
+            (CGEventMask(1) << CGEventType.mouseMoved.rawValue) |
+            (CGEventMask(1) << CGEventType.scrollWheel.rawValue)
         guard let eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
-            eventsOfInterest: mouseMovedMask,
+            eventsOfInterest: eventMask,
             callback: dragEventTapCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
@@ -70,8 +71,23 @@ final class DragEventMonitor {
         stateLock.unlock()
     }
 
+    func beginPinch() {
+        setScrollSuppressionEnabled(true)
+    }
+
+    func endPinch() {
+        setScrollSuppressionEnabled(false)
+    }
+
+    func setScrollSuppressionEnabled(_ enabled: Bool) {
+        stateLock.lock()
+        suppressesScroll = enabled
+        stateLock.unlock()
+    }
+
     func stop() {
         end()
+        endPinch()
 
         if let runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
@@ -93,13 +109,18 @@ final class DragEventMonitor {
             return Unmanaged.passUnretained(event)
         }
 
+        stateLock.lock()
+        let drag = activeDrag
+        let shouldSuppressScroll = suppressesScroll
+        stateLock.unlock()
+
+        if type == .scrollWheel, shouldSuppressScroll {
+            return nil
+        }
+
         guard type == .mouseMoved else {
             return Unmanaged.passUnretained(event)
         }
-
-        stateLock.lock()
-        let drag = activeDrag
-        stateLock.unlock()
 
         guard let drag else {
             return Unmanaged.passUnretained(event)

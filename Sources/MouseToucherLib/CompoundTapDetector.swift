@@ -10,25 +10,36 @@ struct CompoundGestureConfiguration: Equatable {
     static let defaultTapTimeThreshold: TimeInterval = 0.28
     static let defaultMovementThreshold: CGFloat = 0.04
     static let defaultRightClickSplit: CGFloat = 0.5
+    static let defaultPinchStartThreshold: CGFloat = 0.025
+    static let defaultPinchSensitivity: CGFloat = 1.0
 
     static let `default` = CompoundGestureConfiguration(
         tapTimeThreshold: defaultTapTimeThreshold,
         movementThreshold: defaultMovementThreshold,
         rightClickSplit: defaultRightClickSplit,
-        isThreeFingerDragEnabled: true
+        isThreeFingerDragEnabled: true,
+        isPinchZoomEnabled: true,
+        pinchStartThreshold: defaultPinchStartThreshold,
+        pinchSensitivity: defaultPinchSensitivity
     )
 
     var tapTimeThreshold: TimeInterval
     var movementThreshold: CGFloat
     var rightClickSplit: CGFloat
     var isThreeFingerDragEnabled: Bool
+    var isPinchZoomEnabled: Bool
+    var pinchStartThreshold: CGFloat
+    var pinchSensitivity: CGFloat
 
     var normalized: CompoundGestureConfiguration {
         CompoundGestureConfiguration(
             tapTimeThreshold: min(max(tapTimeThreshold, 0.10), 0.50),
             movementThreshold: min(max(movementThreshold, 0.01), 0.12),
             rightClickSplit: min(max(rightClickSplit, 0.35), 0.75),
-            isThreeFingerDragEnabled: isThreeFingerDragEnabled
+            isThreeFingerDragEnabled: isThreeFingerDragEnabled,
+            isPinchZoomEnabled: isPinchZoomEnabled,
+            pinchStartThreshold: min(max(pinchStartThreshold, 0.01), 0.08),
+            pinchSensitivity: min(max(pinchSensitivity, 0.25), 3.0)
         )
     }
 }
@@ -37,6 +48,7 @@ enum CompoundGestureState: Equatable {
     case idle
     case anchorReady
     case tapping
+    case pinching
     case dragging
     case waitingForRelease
 }
@@ -68,15 +80,28 @@ enum CompoundGestureEvent: Equatable {
     case click(CompoundTap)
     case dragBegan(CompoundTap)
     case dragEnded(CompoundTapButton)
+    case magnify(CompoundMagnification)
 }
 
-/// Recognizes a tap made while another finger remains on the surface, plus an
-/// immediate three-finger drag.
+enum CompoundMagnificationPhase: Equatable {
+    case began
+    case changed
+    case ended
+}
+
+struct CompoundMagnification: Equatable {
+    let phase: CompoundMagnificationPhase
+    let amount: CGFloat
+}
+
+/// Recognizes a tap made while another finger remains on the surface, a
+/// continuous two-finger pinch, and an immediate three-finger drag.
 ///
 /// The first finger becomes the anchor. A second finger must touch and release
 /// without either finger moving beyond the configured threshold. The anchor
 /// remains active after a successful gesture so it can be reused for
-/// consecutive clicks. Three simultaneous touches begin a left-button drag
+/// consecutive clicks. Moving two fingers apart or together emits incremental
+/// magnification values. Three simultaneous touches begin a left-button drag
 /// immediately; the drag ends only after every finger lifts.
 final class CompoundTapDetector {
     private(set) var configuration: CompoundGestureConfiguration
@@ -90,6 +115,10 @@ final class CompoundTapDetector {
     private var anchor: TrackedTouch?
     private var tappingFinger: TrackedTouch?
     private var tappingFingerWasRejected = false
+    private var tapIsEligible = true
+    private var pinchInitialDistance: CGFloat?
+    private var pinchPreviousDistance: CGFloat?
+    private(set) var isPinching = false
     private var canBeginTap = true
     private var requiresAllFingersReleased = false
     private(set) var activeDragButton: CompoundTapButton?
@@ -98,6 +127,9 @@ final class CompoundTapDetector {
     var gestureState: CompoundGestureState {
         if activeDragButton != nil {
             return .dragging
+        }
+        if isPinching {
+            return .pinching
         }
         if requiresAllFingersReleased {
             return .waitingForRelease
@@ -119,13 +151,19 @@ final class CompoundTapDetector {
         tapTimeThreshold: TimeInterval = 0.28,
         movementThreshold: CGFloat = 0.04,
         rightClickSplit: CGFloat = 0.5,
-        isThreeFingerDragEnabled: Bool = true
+        isThreeFingerDragEnabled: Bool = true,
+        isPinchZoomEnabled: Bool = true,
+        pinchStartThreshold: CGFloat = 0.025,
+        pinchSensitivity: CGFloat = 1.0
     ) {
         configuration = CompoundGestureConfiguration(
             tapTimeThreshold: tapTimeThreshold,
             movementThreshold: movementThreshold,
             rightClickSplit: rightClickSplit,
-            isThreeFingerDragEnabled: isThreeFingerDragEnabled
+            isThreeFingerDragEnabled: isThreeFingerDragEnabled,
+            isPinchZoomEnabled: isPinchZoomEnabled,
+            pinchStartThreshold: pinchStartThreshold,
+            pinchSensitivity: pinchSensitivity
         ).normalized
     }
 
@@ -135,12 +173,12 @@ final class CompoundTapDetector {
 
     func process(touches: [CompoundTouch], timestamp: TimeInterval) -> CompoundGestureEvent? {
         if touches.isEmpty {
-            let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
+            let endingEvent = endingContinuousGestureEvent()
             resetTracking()
-            if dragEnd != nil {
+            if endingEvent != nil {
                 lastCancellationReason = nil
             }
-            return dragEnd
+            return endingEvent
         }
 
         // Once a three-finger drag starts, tolerate finger movement and partial
@@ -150,6 +188,13 @@ final class CompoundTapDetector {
         }
 
         if touches.count >= 3 {
+            // Switching directly from pinch to drag would require an end and a
+            // begin event in the same frame. End the pinch cleanly and require
+            // a fresh contact sequence instead.
+            if isPinching {
+                return invalidateUntilAllFingersAreReleased(reason: .tooManyFingers)
+            }
+
             guard configuration.isThreeFingerDragEnabled else {
                 return invalidateUntilAllFingersAreReleased(reason: .threeFingerDragDisabled)
             }
@@ -163,6 +208,8 @@ final class CompoundTapDetector {
             anchor = nil
             tappingFinger = nil
             tappingFingerWasRejected = false
+            tapIsEligible = false
+            resetPinchTracking()
             canBeginTap = false
             requiresAllFingersReleased = false
             activeDragButton = .left
@@ -173,15 +220,39 @@ final class CompoundTapDetector {
         guard !requiresAllFingersReleased else { return nil }
 
         guard let anchor else {
-            guard touches.count == 1, let firstTouch = touches.first else {
-                return invalidateUntilAllFingersAreReleased(reason: .tooManyFingers)
+            if touches.count == 1, let firstTouch = touches.first {
+                self.anchor = TrackedTouch(
+                    identifier: firstTouch.identifier,
+                    startPosition: firstTouch.position,
+                    startTime: timestamp
+                )
+                return nil
             }
 
-            self.anchor = TrackedTouch(
-                identifier: firstTouch.identifier,
-                startPosition: firstTouch.position,
-                startTime: timestamp
-            )
+            // Two fingers may land in the same hardware frame. Treat this as
+            // a pinch-only candidate so the gesture still feels trackpad-like,
+            // but never reinterpret its release as a click.
+            if touches.count == 2, configuration.isPinchZoomEnabled {
+                let orderedTouches = touches.sorted { $0.identifier < $1.identifier }
+                let firstTouch = orderedTouches[0]
+                let secondTouch = orderedTouches[1]
+                self.anchor = TrackedTouch(
+                    identifier: firstTouch.identifier,
+                    startPosition: firstTouch.position,
+                    startTime: timestamp
+                )
+                beginSecondaryTracking(
+                    secondaryTouch: secondTouch,
+                    currentAnchor: firstTouch,
+                    timestamp: timestamp,
+                    tapEligible: false
+                )
+                return nil
+            }
+
+            guard touches.count == 1 else {
+                return invalidateUntilAllFingersAreReleased(reason: .tooManyFingers)
+            }
             return nil
         }
 
@@ -190,20 +261,6 @@ final class CompoundTapDetector {
             return invalidateUntilAllFingersAreReleased(
                 reason: tappingFinger == nil ? nil : .anchorReleased
             )
-        }
-
-        let anchorMovedTooFar = distance(
-            from: anchor.startPosition,
-            to: currentAnchor.position
-        ) > movementThreshold
-
-        if anchorMovedTooFar {
-            if tappingFinger == nil {
-                rebaseAnchor(to: currentAnchor, timestamp: timestamp)
-            } else {
-                tappingFingerWasRejected = true
-                lastCancellationReason = .anchorMoved
-            }
         }
 
         let secondaryTouches = touches.filter { $0.identifier != anchor.identifier }
@@ -216,22 +273,56 @@ final class CompoundTapDetector {
                 canBeginTap = true
                 rebaseAnchor(to: currentAnchor, timestamp: timestamp)
             } else if canBeginTap, let secondaryTouch = secondaryTouches.first {
-                self.tappingFinger = TrackedTouch(
-                    identifier: secondaryTouch.identifier,
-                    startPosition: secondaryTouch.position,
-                    startTime: timestamp
+                beginSecondaryTracking(
+                    secondaryTouch: secondaryTouch,
+                    currentAnchor: currentAnchor,
+                    timestamp: timestamp,
+                    tapEligible: true
                 )
-                tappingFingerWasRejected = false
-                canBeginTap = false
             }
             return nil
         }
 
         if let currentTap = secondaryTouches.first(where: { $0.identifier == tappingFinger.identifier }) {
+            let currentDistance = distance(from: currentAnchor.position, to: currentTap.position)
+            let initialDistance = pinchInitialDistance ?? currentDistance
+
+            if isPinching {
+                let previousDistance = pinchPreviousDistance ?? currentDistance
+                pinchPreviousDistance = currentDistance
+                let amount = magnificationAmount(
+                    distanceDelta: currentDistance - previousDistance,
+                    initialDistance: initialDistance
+                )
+                guard abs(amount) > 0.000_01 else { return nil }
+                return .magnify(CompoundMagnification(phase: .changed, amount: amount))
+            }
+
+            if configuration.isPinchZoomEnabled,
+               abs(currentDistance - initialDistance) >= configuration.pinchStartThreshold {
+                isPinching = true
+                tapIsEligible = false
+                tappingFingerWasRejected = false
+                pinchPreviousDistance = currentDistance
+                lastCancellationReason = nil
+                return .magnify(
+                    CompoundMagnification(
+                        phase: .began,
+                        amount: magnificationAmount(
+                            distanceDelta: currentDistance - initialDistance,
+                            initialDistance: initialDistance
+                        )
+                    )
+                )
+            }
+
             let duration = timestamp - tappingFinger.startTime
             if duration < 0 || duration > tapTimeThreshold {
                 tappingFingerWasRejected = true
                 lastCancellationReason = .tapTooLong
+            } else if distance(from: anchor.startPosition, to: currentAnchor.position) > movementThreshold {
+                tappingFingerWasRejected = true
+                lastCancellationReason = .anchorMoved
             } else if distance(from: tappingFinger.startPosition, to: currentTap.position) > movementThreshold {
                 tappingFingerWasRejected = true
                 lastCancellationReason = .tapMoved
@@ -242,26 +333,32 @@ final class CompoundTapDetector {
         // Accept another tap only after a clean anchor-only frame. This prevents
         // a replacement touch identifier from being interpreted as a release.
         guard secondaryTouches.isEmpty else {
-            self.tappingFinger = nil
-            tappingFingerWasRejected = false
-            canBeginTap = false
-            lastCancellationReason = .replacementTouch
-            return nil
+            return invalidateUntilAllFingersAreReleased(reason: .replacementTouch)
         }
 
         rebaseAnchor(to: currentAnchor, timestamp: timestamp)
 
+        if isPinching {
+            clearSecondaryTracking(canBeginNextTap: true)
+            lastCancellationReason = nil
+            return .magnify(CompoundMagnification(phase: .ended, amount: 0))
+        }
+
+        if distance(from: anchor.startPosition, to: currentAnchor.position) > movementThreshold {
+            tappingFingerWasRejected = true
+            lastCancellationReason = .anchorMoved
+        }
+
         defer {
-            self.tappingFinger = nil
-            tappingFingerWasRejected = false
-            canBeginTap = true
+            clearSecondaryTracking(canBeginNextTap: true)
         }
 
         let duration = timestamp - tappingFinger.startTime
-        guard !tappingFingerWasRejected,
+        guard tapIsEligible,
+              !tappingFingerWasRejected,
               duration >= 0,
               duration <= tapTimeThreshold else {
-            if lastCancellationReason == nil {
+            if tapIsEligible, lastCancellationReason == nil {
                 lastCancellationReason = .tapTooLong
             }
             return nil
@@ -271,12 +368,12 @@ final class CompoundTapDetector {
         return .click(makeTap(from: tappingFinger))
     }
 
-    /// Cancels recognition and returns a matching mouse-up event if a drag is active.
+    /// Cancels recognition and returns a matching end event for a continuous gesture.
     func cancel(reason: CompoundGestureCancellationReason = .disabled) -> CompoundGestureEvent? {
-        let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
+        let endingEvent = endingContinuousGestureEvent()
         resetTracking()
         lastCancellationReason = reason
-        return dragEnd
+        return endingEvent
     }
 
     func updateConfiguration(_ configuration: CompoundGestureConfiguration) -> CompoundGestureEvent? {
@@ -296,6 +393,8 @@ final class CompoundTapDetector {
         anchor = nil
         tappingFinger = nil
         tappingFingerWasRejected = false
+        tapIsEligible = true
+        resetPinchTracking()
         canBeginTap = true
         requiresAllFingersReleased = false
         activeDragButton = nil
@@ -304,17 +403,72 @@ final class CompoundTapDetector {
     private func invalidateUntilAllFingersAreReleased(
         reason: CompoundGestureCancellationReason?
     ) -> CompoundGestureEvent? {
-        let dragEnd = activeDragButton.map(CompoundGestureEvent.dragEnded)
+        let endingEvent = endingContinuousGestureEvent()
         anchor = nil
         tappingFinger = nil
         tappingFingerWasRejected = false
+        tapIsEligible = true
+        resetPinchTracking()
         canBeginTap = false
         requiresAllFingersReleased = true
         activeDragButton = nil
         if let reason {
             lastCancellationReason = reason
         }
-        return dragEnd
+        return endingEvent
+    }
+
+    private func beginSecondaryTracking(
+        secondaryTouch: CompoundTouch,
+        currentAnchor: CompoundTouch,
+        timestamp: TimeInterval,
+        tapEligible: Bool
+    ) {
+        tappingFinger = TrackedTouch(
+            identifier: secondaryTouch.identifier,
+            startPosition: secondaryTouch.position,
+            startTime: timestamp
+        )
+        tappingFingerWasRejected = false
+        tapIsEligible = tapEligible
+        let initialDistance = distance(from: currentAnchor.position, to: secondaryTouch.position)
+        pinchInitialDistance = initialDistance
+        pinchPreviousDistance = initialDistance
+        isPinching = false
+        canBeginTap = false
+    }
+
+    private func clearSecondaryTracking(canBeginNextTap: Bool) {
+        tappingFinger = nil
+        tappingFingerWasRejected = false
+        tapIsEligible = true
+        resetPinchTracking()
+        canBeginTap = canBeginNextTap
+    }
+
+    private func resetPinchTracking() {
+        pinchInitialDistance = nil
+        pinchPreviousDistance = nil
+        isPinching = false
+    }
+
+    private func endingContinuousGestureEvent() -> CompoundGestureEvent? {
+        if let activeDragButton {
+            return .dragEnded(activeDragButton)
+        }
+        if isPinching {
+            return .magnify(CompoundMagnification(phase: .ended, amount: 0))
+        }
+        return nil
+    }
+
+    private func magnificationAmount(
+        distanceDelta: CGFloat,
+        initialDistance: CGFloat
+    ) -> CGFloat {
+        let safeInitialDistance = max(initialDistance, 0.05)
+        let unbounded = distanceDelta / safeInitialDistance * configuration.pinchSensitivity
+        return min(max(unbounded, -0.08), 0.08)
     }
 
     private func makeTap(from touch: TrackedTouch) -> CompoundTap {

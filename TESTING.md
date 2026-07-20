@@ -17,6 +17,9 @@ The suite currently checks:
 - the same anchor can remain down, drift, and be reused for consecutive clicks
 - three fingers begin a drag immediately and lifting every finger ends the drag
 - mouse movement maps to continuous dragged events while a drag is active
+- two-finger expansion and contraction produce continuous native magnification values
+- simultaneous two-finger contact can begin pinch without becoming an accidental click
+- disabling or cancelling pinch safely ends the native magnification sequence
 - disabling three-finger drag rejects the gesture and reports the reason
 - adjustable thresholds and the left/right boundary are applied correctly
 - finger movement or partial contact loss does not interrupt an active drag
@@ -41,7 +44,7 @@ Build the complete universal macOS application:
 ./build.sh
 ```
 
-The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 1.8.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
+The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 1.9.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
 
 ## Manual Magic Mouse checklist
 
@@ -51,6 +54,9 @@ The application build compiles both Apple Silicon and Intel binaries, combines t
 - The displayed current macOS version matches `sw_vers`, and its exact preset is marked as current.
 - Adding an arbitrary past or future OS preset, marking it as default, and applying it to the current OS all work.
 - The live status updates touch count, gesture state, recognized operation, and cancellation reason.
+- In Safari or Preview, spreading two fingers zooms in smoothly and bringing them together zooms out smoothly.
+- Pinching does not leak an ordinary scroll event into the target application.
+- Releasing either pinch finger sends an ended phase and leaves the next tap responsive.
 - The launch-at-login switch registers and unregisters the app on macOS 13 or later.
 - A single finger resting, tapping, or scrolling does not click.
 - Hold one finger still and tap the left half with a second finger: one left-click occurs.

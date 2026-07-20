@@ -12,11 +12,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: MouseToucherSettings?
     private var settingsWindowController: SettingsWindowController?
     private let dragEventMonitor = DragEventMonitor()
+    private let magnificationEmitter = NativeMagnificationEmitter()
     private var clickSequenceTracker = ClickSequenceTracker(
         doubleClickInterval: NSEvent.doubleClickInterval,
         maximumCursorMovement: 5.0
     )
     private var activeDrag: (button: CompoundTapButton, clickCount: Int64)?
+    private var isMagnifying = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupSettings()
@@ -30,7 +32,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasShownAccessibilityInstructions = true
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "MouseToucher 1.8 needs accessibility permissions to simulate clicks.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 1.8. The app will begin working as soon as permission is granted."
+        alert.informativeText = "MouseToucher 1.9 needs accessibility permissions to simulate clicks and native pinch gestures.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 1.9. The app will begin working as soon as permission is granted."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Quit")
@@ -47,6 +49,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         multitouchManager?.stop()
         endActiveDrag(at: CGEvent(source: nil)?.location ?? CGPoint.zero)
+        endActiveMagnification(at: CGEvent(source: nil)?.location ?? CGPoint.zero)
         dragEventMonitor.stop()
     }
 
@@ -54,7 +57,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 1.8")
+            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 1.9")
         }
 
         let menu = NSMenu()
@@ -73,9 +76,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(accessibilityItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "About MouseToucher 1.8", action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "About MouseToucher 1.9", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit MouseToucher 1.8", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit MouseToucher 1.9", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem?.menu = menu
     }
@@ -99,7 +102,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "MouseToucher 1.8"
+        alert.messageText = "MouseToucher 1.9"
         alert.informativeText = """
         Intentional tap-to-click for Magic Mouse
 
@@ -107,11 +110,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         • Tap the left side with another finger for left click
         • Tap the right side with another finger for right click
         • Repeat taps for double and multi-click
+        • Pinch with two fingers for smooth native zoom
         • Place three fingers to drag immediately; lift all fingers to drop
         • Tune gesture recognition in Settings
         • Automatically use a preset for the current macOS version
 
-        Version 1.8
+        Version 1.9
 
         Uses private MultitouchSupport framework
         """
@@ -155,6 +159,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         multitouchManager?.onStatusChanged = { [weak self] status in
             let updateStatus: () -> Void = {
+                let isTwoFingerGesture = status.touchCount >= 2 &&
+                    (status.state == .tapping || status.state == .pinching)
+                self?.dragEventMonitor.setScrollSuppressionEnabled(isTwoFingerGesture)
                 self?.settingsWindowController?.updateStatus(status)
             }
 
@@ -216,7 +223,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if enabled, SMAppService.mainApp.status == .requiresApproval {
                 let alert = NSAlert()
                 alert.messageText = "ログイン時の自動起動を許可してください"
-                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 1.8 を許可してください。"
+                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 1.9 を許可してください。"
                 alert.addButton(withTitle: "ログイン項目を開く")
                 alert.addButton(withTitle: "後で")
                 if alert.runModal() == .alertFirstButtonReturn {
@@ -273,7 +280,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             beginDrag(at: location, button: tap.button)
         case .dragEnded(let button):
             endActiveDrag(at: location, expectedButton: button)
+        case .magnify(let magnification):
+            handleMagnification(magnification, at: location)
         }
+    }
+
+    private func handleMagnification(
+        _ magnification: CompoundMagnification,
+        at location: CGPoint
+    ) {
+        switch magnification.phase {
+        case .began:
+            guard !isMagnifying else { return }
+            isMagnifying = true
+            dragEventMonitor.beginPinch()
+            magnificationEmitter.post(magnification, at: location)
+        case .changed:
+            guard isMagnifying else { return }
+            magnificationEmitter.post(magnification, at: location)
+        case .ended:
+            guard isMagnifying else { return }
+            magnificationEmitter.post(magnification, at: location)
+            isMagnifying = false
+            dragEventMonitor.endPinch()
+        }
+    }
+
+    private func endActiveMagnification(at location: CGPoint) {
+        guard isMagnifying else { return }
+        magnificationEmitter.post(
+            CompoundMagnification(phase: .ended, amount: 0),
+            at: location
+        )
+        isMagnifying = false
+        dragEventMonitor.endPinch()
     }
 
     private func beginDrag(at location: CGPoint, button: CompoundTapButton) {

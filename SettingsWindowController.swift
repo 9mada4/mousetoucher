@@ -11,10 +11,15 @@ final class SettingsWindowController: NSWindowController {
     private let tapTimeSlider = NSSlider()
     private let movementSlider = NSSlider()
     private let splitSlider = NSSlider()
+    private let pinchStartSlider = NSSlider()
+    private let pinchSensitivitySlider = NSSlider()
     private let tapTimeValueLabel = NSTextField(labelWithString: "")
     private let movementValueLabel = NSTextField(labelWithString: "")
     private let splitValueLabel = NSTextField(labelWithString: "")
+    private let pinchStartValueLabel = NSTextField(labelWithString: "")
+    private let pinchSensitivityValueLabel = NSTextField(labelWithString: "")
     private let threeFingerDragCheckbox = NSButton()
+    private let pinchZoomCheckbox = NSButton()
     private let launchAtLoginCheckbox = NSButton()
 
     private let touchCountLabel = NSTextField(labelWithString: "0")
@@ -32,12 +37,12 @@ final class SettingsWindowController: NSWindowController {
         super.init(window: nil)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 650),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 800),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "MouseToucher 1.8 設定"
+        window.title = "MouseToucher 1.9 設定"
         window.isReleasedWhenClosed = false
         window.center()
         self.window = window
@@ -94,7 +99,25 @@ final class SettingsWindowController: NSWindowController {
         splitSlider.target = self
         splitSlider.action = #selector(configurationControlChanged)
 
-        for label in [tapTimeValueLabel, movementValueLabel, splitValueLabel] {
+        pinchStartSlider.minValue = 0.01
+        pinchStartSlider.maxValue = 0.08
+        pinchStartSlider.isContinuous = true
+        pinchStartSlider.target = self
+        pinchStartSlider.action = #selector(configurationControlChanged)
+
+        pinchSensitivitySlider.minValue = 0.25
+        pinchSensitivitySlider.maxValue = 3.0
+        pinchSensitivitySlider.isContinuous = true
+        pinchSensitivitySlider.target = self
+        pinchSensitivitySlider.action = #selector(configurationControlChanged)
+
+        for label in [
+            tapTimeValueLabel,
+            movementValueLabel,
+            splitValueLabel,
+            pinchStartValueLabel,
+            pinchSensitivityValueLabel
+        ] {
             label.alignment = .right
             label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         }
@@ -103,6 +126,11 @@ final class SettingsWindowController: NSWindowController {
         threeFingerDragCheckbox.title = "3本指ドラッグを有効にする"
         threeFingerDragCheckbox.target = self
         threeFingerDragCheckbox.action = #selector(configurationControlChanged)
+
+        pinchZoomCheckbox.setButtonType(.switch)
+        pinchZoomCheckbox.title = "2本指ピンチズームを有効にする"
+        pinchZoomCheckbox.target = self
+        pinchZoomCheckbox.action = #selector(configurationControlChanged)
 
         launchAtLoginCheckbox.setButtonType(.switch)
         launchAtLoginCheckbox.title = launchAtLoginAvailable
@@ -154,7 +182,9 @@ final class SettingsWindowController: NSWindowController {
         let settingsGrid = NSGridView(views: [
             [NSTextField(labelWithString: "タップ判定時間"), tapTimeSlider, tapTimeValueLabel],
             [NSTextField(labelWithString: "移動許容量"), movementSlider, movementValueLabel],
-            [NSTextField(labelWithString: "左右クリック境界"), splitSlider, splitValueLabel]
+            [NSTextField(labelWithString: "左右クリック境界"), splitSlider, splitValueLabel],
+            [NSTextField(labelWithString: "ピンチ開始距離"), pinchStartSlider, pinchStartValueLabel],
+            [NSTextField(labelWithString: "ピンチ感度"), pinchSensitivitySlider, pinchSensitivityValueLabel]
         ])
         settingsGrid.rowSpacing = 12
         settingsGrid.columnSpacing = 12
@@ -167,6 +197,7 @@ final class SettingsWindowController: NSWindowController {
         let behaviorStack = NSStackView(views: [
             makeSectionTitle("判定"),
             settingsGrid,
+            pinchZoomCheckbox,
             threeFingerDragCheckbox,
             launchAtLoginCheckbox,
             resetButton
@@ -261,6 +292,9 @@ final class SettingsWindowController: NSWindowController {
         tapTimeSlider.doubleValue = configuration.tapTimeThreshold
         movementSlider.doubleValue = Double(configuration.movementThreshold)
         splitSlider.doubleValue = Double(configuration.rightClickSplit)
+        pinchStartSlider.doubleValue = Double(configuration.pinchStartThreshold)
+        pinchSensitivitySlider.doubleValue = Double(configuration.pinchSensitivity)
+        pinchZoomCheckbox.state = configuration.isPinchZoomEnabled ? .on : .off
         threeFingerDragCheckbox.state = configuration.isThreeFingerDragEnabled ? .on : .off
         updateValueLabels()
     }
@@ -270,7 +304,10 @@ final class SettingsWindowController: NSWindowController {
             tapTimeThreshold: tapTimeSlider.doubleValue,
             movementThreshold: CGFloat(movementSlider.doubleValue),
             rightClickSplit: CGFloat(splitSlider.doubleValue),
-            isThreeFingerDragEnabled: threeFingerDragCheckbox.state == .on
+            isThreeFingerDragEnabled: threeFingerDragCheckbox.state == .on,
+            isPinchZoomEnabled: pinchZoomCheckbox.state == .on,
+            pinchStartThreshold: CGFloat(pinchStartSlider.doubleValue),
+            pinchSensitivity: CGFloat(pinchSensitivitySlider.doubleValue)
         ).normalized
     }
 
@@ -278,6 +315,8 @@ final class SettingsWindowController: NSWindowController {
         tapTimeValueLabel.stringValue = String(format: "%.2f 秒", tapTimeSlider.doubleValue)
         movementValueLabel.stringValue = String(format: "%.3f", movementSlider.doubleValue)
         splitValueLabel.stringValue = String(format: "左 %.0f%%", splitSlider.doubleValue * 100)
+        pinchStartValueLabel.stringValue = String(format: "%.3f", pinchStartSlider.doubleValue)
+        pinchSensitivityValueLabel.stringValue = String(format: "%.2f×", pinchSensitivitySlider.doubleValue)
     }
 
     @objc private func configurationControlChanged() {
@@ -368,6 +407,7 @@ private extension CompoundGestureState {
         case .idle: return "待機中"
         case .anchorReady: return "固定指を認識"
         case .tapping: return "タップ判定中"
+        case .pinching: return "ピンチズーム中"
         case .dragging: return "ドラッグ中"
         case .waitingForRelease: return "全指が離れるのを待機"
         }
@@ -382,6 +422,9 @@ private extension RecognizedGesture {
         case .rightClick: return "右クリック"
         case .dragStarted: return "ドラッグ開始"
         case .dropped: return "ドロップ"
+        case .zoomIn: return "ズームイン"
+        case .zoomOut: return "ズームアウト"
+        case .zoomEnded: return "ズーム終了"
         }
     }
 }

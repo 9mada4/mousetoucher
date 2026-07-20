@@ -12,6 +12,7 @@ swiftc \
     Sources/MouseToucherLib/CompoundTapDetector.swift \
     MouseToucherSettings.swift \
     DragEventMonitor.swift \
+    NativeMagnificationEmitter.swift \
     Tests/CompoundTapDetectorTests.swift \
     -o "$TEST_BUILD_DIR/MouseToucherLogicTests"
 

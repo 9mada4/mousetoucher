@@ -6,7 +6,7 @@
   <img alt="Mouse Toucher Logo" src="mousetoucher-light.png">
 </picture>
 
-**Intentional tap-to-click and drag for your Apple Magic Mouse.** (v1.8)
+**Intentional tap-to-click, native pinch zoom, and drag for your Apple Magic Mouse.** (v1.9)
 
 Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse. Keep one finger still as an anchor, then tap with another finger to click without pressing the mouse surface down. A single resting finger never clicks by itself.
 
@@ -17,6 +17,7 @@ Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse.
 - ⚡ **Repeat the tap** for double- and multi-click
 - ✋ **Place three fingers** to start dragging immediately; lift all fingers to drop
 - 🪟 **Continuous drag tracking** keeps windows and items attached throughout mouse movement
+- 🔍 **Two-finger native pinch** sends smooth magnification values with full gesture phases
 - 🛡️ **Movement cancellation before a click** prevents scrolling and ordinary finger movement from becoming clicks
 - 🎯 **Easy toggle** on/off from the menu bar
 - ⚙️ **Live settings** for tap time, movement tolerance, left/right boundary, and three-finger drag
@@ -43,7 +44,7 @@ A universal binary (works on both Apple Silicon and Intel Macs) is included in t
 cd /path/to/mousetoucher
 
 # Copy to Applications
-cp -r "build/MouseToucher 1.8.app" /Applications/
+cp -r "build/MouseToucher 1.9.app" /Applications/
 ```
 
 ### Option 2: Build From Source
@@ -53,16 +54,16 @@ If you prefer to build it yourself:
 ```bash
 cd /path/to/mousetoucher
 ./build.sh   # Builds and ad-hoc codesigns the app so Accessibility permissions stick
-cp -r "build/MouseToucher 1.8.app" /Applications/
+cp -r "build/MouseToucher 1.9.app" /Applications/
 ```
 
 ### Grant Permissions
 
-1. Open **MouseToucher 1.8** from your Applications folder
+1. Open **MouseToucher 1.9** from your Applications folder
 2. You'll see a permission request - click **"Open System Settings"**
-3. In **Privacy & Security → Accessibility**, enable **MouseToucher 1.8** ✓
-   - If the app is missing, click the **+** button and add it from `/Applications/MouseToucher 1.8.app`
-4. Return to MouseToucher 1.8 – it will begin working automatically once the toggle is on (no relaunch needed)
+3. In **Privacy & Security → Accessibility**, enable **MouseToucher 1.9** ✓
+   - If the app is missing, click the **+** button and add it from `/Applications/MouseToucher 1.9.app`
+4. Return to MouseToucher 1.9 – it will begin working automatically once the toggle is on (no relaunch needed)
 
 That's it! You'll see a mouse icon in your menu bar.
 
@@ -76,8 +77,9 @@ That's it! You'll see a mouse icon in your menu bar.
    - Tap the **left half** = normal click
    - Tap the **right half** = right-click (context menu)
 4. Keep the anchor finger down and tap again for a double- or multi-click; the anchor does not need to be lifted between taps
-5. To drag, place three fingers on the mouse, move the mouse immediately, then lift all fingers to drop
-6. You can still press the mouse normally; physical clicks cancel any in-progress tap gesture
+5. To zoom, place two fingers and smoothly spread them apart or bring them together
+6. To drag, place three fingers on the mouse, move the mouse immediately, then lift all fingers to drop
+7. You can still press the mouse normally; physical clicks cancel any in-progress gesture
 
 ### Menu Bar Controls
 
@@ -93,6 +95,7 @@ Click the mouse icon in your menu bar to:
 MouseToucher stores settings outside the version-specific app identifier, so they survive app updates. The settings window lets you:
 
 - adjust tap duration, movement tolerance, and the left/right click boundary
+- enable native pinch zoom and adjust its start distance and sensitivity
 - enable or disable three-finger drag
 - see the current touch count, recognition state, last gesture, and cancellation reason
 - add a preset for any past or future macOS version
@@ -124,7 +127,7 @@ On macOS 13 or later:
 
 1. Open **Settings** from the MouseToucher menu-bar icon
 2. Turn on **Launch at login**
-3. If macOS asks for approval, allow **MouseToucher 1.8** in **System Settings → General → Login Items**
+3. If macOS asks for approval, allow **MouseToucher 1.9** in **System Settings → General → Login Items**
 
 The same switch removes the login item when turned off.
 
@@ -158,8 +161,8 @@ These permissions are granted by you in System Settings and can be revoked at an
 
 **Check permissions:**
 1. Go to **System Settings → Privacy & Security → Accessibility**
-2. Make sure **MouseToucher 1.8** is in the list and **checked** ✓
-3. If it disappeared (after rebuilding), click **+** and re-add `/Applications/MouseToucher 1.8.app`
+2. Make sure **MouseToucher 1.9** is in the list and **checked** ✓
+3. If it disappeared (after rebuilding), click **+** and re-add `/Applications/MouseToucher 1.9.app`
 4. Toggle the checkbox off/on once — the app will detect the change immediately
 
 **Verify Magic Mouse:**
@@ -171,7 +174,7 @@ These permissions are granted by you in System Settings and can be revoked at an
 
 **"App is damaged" error:**
 - This is normal for apps not from the App Store
-- Right-click MouseToucher 1.8 → **Open** → Click **Open** again in the dialog
+- Right-click MouseToucher 1.9 → **Open** → Click **Open** again in the dialog
 - Or: Go to **System Settings → Privacy & Security** and click **Open Anyway**
 
 ### Adjusting sensitivity
@@ -184,13 +187,13 @@ To remove MouseToucher:
 
 ```bash
 # Remove the app
-trash "/Applications/MouseToucher 1.8.app"
+trash "/Applications/MouseToucher 1.9.app"
 
 # Remove from Login Items (if you added it)
 # Or turn off Launch at login in MouseToucher Settings before removing the app
 
 # Revoke permissions (optional)
-# System Settings → Privacy & Security → Accessibility → Remove MouseToucher 1.8
+# System Settings → Privacy & Security → Accessibility → Remove MouseToucher 1.9
 ```
 
 ## 💬 Feedback & Support

@@ -8,6 +8,9 @@ enum RecognizedGesture: Equatable {
     case rightClick
     case dragStarted
     case dropped
+    case zoomIn
+    case zoomOut
+    case zoomEnded
 }
 
 struct GestureStatusSnapshot: Equatable {
@@ -186,6 +189,11 @@ class MultitouchManager {
             return .dragStarted
         case .dragEnded:
             return .dropped
+        case .magnify(let magnification):
+            if magnification.phase == .ended {
+                return .zoomEnded
+            }
+            return magnification.amount >= 0 ? .zoomIn : .zoomOut
         }
     }
 
