@@ -328,6 +328,19 @@ private func testOSPresetsFollowCurrentSystemVersion() throws {
     try expectEqual(afterUpgrade.activeConfiguration, .default)
 }
 
+private func testDragMotionUsesContinuousDraggedEventTypes() throws {
+    try expectEqual(
+        DragMotionEventMapper.eventType(for: .left),
+        CGEventType.leftMouseDragged
+    )
+    try expectEqual(
+        DragMotionEventMapper.eventType(for: .right),
+        CGEventType.rightMouseDragged
+    )
+    try expectEqual(DragMotionEventMapper.buttonNumber(for: .left), 0)
+    try expectEqual(DragMotionEventMapper.buttonNumber(for: .right), 1)
+}
+
 private func testConsecutiveClicksIncrementClickCount() throws {
     var tracker = ClickSequenceTracker(doubleClickInterval: 0.5)
     let location = CGPoint(x: 100, y: 100)
@@ -398,6 +411,7 @@ private enum CompoundTapTestRunner {
             ("disabled drag reports its reason", testDisabledThreeFingerDragReportsReason),
             ("configuration change ends drag", testConfigurationChangeEndsActiveDrag),
             ("OS presets follow the current version", testOSPresetsFollowCurrentSystemVersion),
+            ("drag motion uses dragged event types", testDragMotionUsesContinuousDraggedEventTypes),
             ("click count increments", testConsecutiveClicksIncrementClickCount),
             ("button change resets click count", testDifferentButtonStartsNewSequence),
             ("expired interval resets click count", testExpiredIntervalStartsNewSequence),

@@ -11,6 +11,7 @@ trap 'rm -rf "$TEST_BUILD_DIR"' EXIT
 swiftc \
     Sources/MouseToucherLib/CompoundTapDetector.swift \
     MouseToucherSettings.swift \
+    DragEventMonitor.swift \
     Tests/CompoundTapDetectorTests.swift \
     -o "$TEST_BUILD_DIR/MouseToucherLogicTests"
 

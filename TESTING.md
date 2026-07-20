@@ -16,6 +16,7 @@ The suite currently checks:
 - anchor plus a left- or right-side tap produces the correct button
 - the same anchor can remain down, drift, and be reused for consecutive clicks
 - three fingers begin a drag immediately and lifting every finger ends the drag
+- mouse movement maps to continuous dragged events while a drag is active
 - disabling three-finger drag rejects the gesture and reports the reason
 - adjustable thresholds and the left/right boundary are applied correctly
 - finger movement or partial contact loss does not interrupt an active drag
@@ -40,7 +41,7 @@ Build the complete universal macOS application:
 ./build.sh
 ```
 
-The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 1.7.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
+The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 1.8.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
 
 ## Manual Magic Mouse checklist
 
@@ -55,7 +56,7 @@ The application build compiles both Apple Silicon and Intel binaries, combines t
 - Hold one finger still and tap the left half with a second finger: one left-click occurs.
 - Hold one finger still and tap the right half with a second finger: one right-click occurs.
 - Repeat the second-finger tap while keeping the anchor down: double-click and multi-click actions work.
-- Place three fingers, move the mouse immediately, then lift every finger: the item follows and drops.
+- Place three fingers, move the mouse immediately, then lift every finger: the item follows continuously during movement and drops without jumping only at the end.
 - Moving either finger during a two-finger click cancels only that click; the anchor can stay down for another attempt.
 - Finger movement or partial contact loss after a three-finger drag begins does not release the dragged item.
 - Adding a third finger begins a drag when three-finger drag is enabled.

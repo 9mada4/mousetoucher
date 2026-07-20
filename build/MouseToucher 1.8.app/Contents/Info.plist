@@ -5,23 +5,23 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>MouseToucher 1.7</string>
+    <string>MouseToucher 1.8</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.mousetoucher.app.v1-7</string>
+    <string>com.mousetoucher.app.v1-8</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>MouseToucher 1.7</string>
+    <string>MouseToucher 1.8</string>
     <key>CFBundleDisplayName</key>
-    <string>MouseToucher 1.7</string>
+    <string>MouseToucher 1.8</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.7</string>
+    <string>1.8</string>
     <key>CFBundleVersion</key>
-    <string>8</string>
+    <string>9</string>
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
     <key>LSUIElement</key>
@@ -31,8 +31,8 @@
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>MouseToucher 1.7 needs to monitor mouse events to detect taps on your Magic Mouse.</string>
+    <string>MouseToucher 1.8 needs to monitor mouse events to detect taps on your Magic Mouse.</string>
     <key>NSAccessibilityUsageDescription</key>
-    <string>MouseToucher 1.7 requires accessibility permissions to detect taps on your Magic Mouse and simulate clicks.</string>
+    <string>MouseToucher 1.8 requires accessibility permissions to detect taps on your Magic Mouse and simulate clicks.</string>
 </dict>
 </plist>

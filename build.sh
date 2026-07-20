@@ -2,7 +2,7 @@
 
 # Build script for Mouse Toucher app (Production)
 
-APP_NAME="MouseToucher 1.7"
+APP_NAME="MouseToucher 1.8"
 BUILD_DIR="build"
 APP_PATH="$BUILD_DIR/$APP_NAME.app"
 ICON_SOURCE="Assets/AppIcon.png"
@@ -54,6 +54,7 @@ swiftc -o "$BUILD_DIR/${APP_NAME}_arm64" \
     -Xlinker -rpath -Xlinker /System/Library/PrivateFrameworks \
     Sources/MouseToucherLib/CompoundTapDetector.swift \
     MouseToucherSettings.swift \
+    DragEventMonitor.swift \
     MultitouchManager.swift \
     SettingsWindowController.swift \
     AppDelegate.swift \
@@ -77,6 +78,7 @@ swiftc -o "$BUILD_DIR/${APP_NAME}_x86_64" \
     -Xlinker -rpath -Xlinker /System/Library/PrivateFrameworks \
     Sources/MouseToucherLib/CompoundTapDetector.swift \
     MouseToucherSettings.swift \
+    DragEventMonitor.swift \
     MultitouchManager.swift \
     SettingsWindowController.swift \
     AppDelegate.swift \

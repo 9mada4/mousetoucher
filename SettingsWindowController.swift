@@ -37,7 +37,7 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "MouseToucher 1.7 設定"
+        window.title = "MouseToucher 1.8 設定"
         window.isReleasedWhenClosed = false
         window.center()
         self.window = window
