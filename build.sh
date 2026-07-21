@@ -2,7 +2,7 @@
 
 # Build script for Mouse Toucher app (Production)
 
-APP_NAME="MouseToucher 1.9"
+APP_NAME="MouseToucher 2.0"
 BUILD_DIR="build"
 APP_PATH="$BUILD_DIR/$APP_NAME.app"
 ICON_SOURCE="Assets/AppIcon.png"
