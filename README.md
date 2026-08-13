@@ -36,37 +36,54 @@ Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse.
 
 ## 🚀 Installation
 
-### Option 1: Use Pre-Built Binary (Recommended)
+### Install the Pre-Built App (Recommended)
 
-A universal binary (works on both Apple Silicon and Intel Macs) is included in the `build` folder.
+No Xcode or Terminal commands are required. The repository includes a universal app that works on both Apple Silicon and Intel Macs.
+
+1. Download the [current repository as a ZIP](https://github.com/9mada4/mousetoucher/archive/refs/heads/main.zip)
+2. Double-click `mousetoucher-main.zip` to extract it
+3. Open the extracted `mousetoucher-main` folder, then open `build`
+4. Drag **MouseToucher 2.0.app** into your **Applications** folder
+5. In **Applications**, Control-click **MouseToucher 2.0** and choose **Open**
+6. Confirm **Open** when macOS asks, then complete the Accessibility steps below
+
+Copy the app to **Applications before opening it** so that macOS registers and grants permission to the installed copy.
+
+<details>
+<summary>Install the pre-built app from Terminal</summary>
 
 ```bash
-# Navigate to the repository
-cd /path/to/mousetoucher
-
-# Copy to Applications
-cp -r "build/MouseToucher 2.0.app" /Applications/
+git clone https://github.com/9mada4/mousetoucher.git
+cd mousetoucher
+ditto "build/MouseToucher 2.0.app" "/Applications/MouseToucher 2.0.app"
+open "/Applications/MouseToucher 2.0.app"
 ```
 
-### Option 2: Build From Source
+</details>
 
-If you prefer to build it yourself:
+### Build From Source
+
+Apple's Command Line Tools are required. If `swiftc --version` is unavailable, run `xcode-select --install` first. Then build and install the app:
 
 ```bash
-cd /path/to/mousetoucher
-./build.sh   # Builds and ad-hoc codesigns the app so Accessibility permissions stick
-cp -r "build/MouseToucher 2.0.app" /Applications/
+git clone https://github.com/9mada4/mousetoucher.git
+cd mousetoucher
+./build.sh
+ditto "build/MouseToucher 2.0.app" "/Applications/MouseToucher 2.0.app"
+open "/Applications/MouseToucher 2.0.app"
 ```
 
-### Grant Permissions
+`build.sh` compiles Apple Silicon and Intel executables, combines them into a universal app, and ad-hoc signs the completed bundle.
 
-1. Open **MouseToucher 2.0** from your Applications folder
-2. You'll see a permission request - click **"Open System Settings"**
-3. In **Privacy & Security → Accessibility**, enable **MouseToucher 2.0** ✓
-   - If the app is missing, click the **+** button and add it from `/Applications/MouseToucher 2.0.app`
-4. Return to MouseToucher 2.0 – it will begin working automatically once the toggle is on (no relaunch needed)
+### First Launch and Accessibility Permission
 
-That's it! You'll see a mouse icon in your menu bar.
+1. Open **MouseToucher 2.0** from **Applications**
+2. In the permission message, click **Open System Settings**
+3. In **Privacy & Security → Accessibility**, enable **MouseToucher 2.0**
+4. If it is not listed, click **+** and select `/Applications/MouseToucher 2.0.app`
+5. Return to MouseToucher 2.0; it starts working as soon as permission is enabled and **Compound Tap** is on
+
+The app runs in the menu bar rather than the Dock. Look for the mouse icon near the top-right of the screen.
 
 ## 📖 How to Use
 
@@ -172,12 +189,13 @@ These permissions are granted by you in System Settings and can be revoked at an
 2. Your Magic Mouse should show as "Connected"
 3. Try moving the mouse to confirm it's working
 
-### App won't launch
+### macOS blocks the first launch
 
-**"App is damaged" error:**
-- This is normal for apps not from the App Store
-- Right-click MouseToucher 2.0 → **Open** → Click **Open** again in the dialog
-- Or: Go to **System Settings → Privacy & Security** and click **Open Anyway**
+MouseToucher is ad-hoc signed and is not notarized or distributed through the Mac App Store, so macOS may block the first launch.
+
+1. In **Applications**, Control-click **MouseToucher 2.0** and choose **Open**
+2. Click **Open** in the confirmation dialog
+3. If macOS still blocks it, open **System Settings → Privacy & Security**, find the MouseToucher message, and click **Open Anyway**
 
 ### Adjusting sensitivity
 
