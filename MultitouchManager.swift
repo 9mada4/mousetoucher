@@ -2,22 +2,40 @@ import Foundation
 import CoreGraphics
 import AppKit
 
+enum RecognizedGesture: Equatable {
+    case none
+    case leftClick
+    case rightClick
+    case dragStarted
+    case dropped
+    case zoomIn
+    case zoomOut
+    case zoomEnded
+}
+
+struct GestureStatusSnapshot: Equatable {
+    let touchCount: Int
+    let state: CompoundGestureState
+    let lastRecognizedGesture: RecognizedGesture
+    let cancellationReason: CompoundGestureCancellationReason?
+}
+
 // Swift wrapper for Multitouch framework
 class MultitouchManager {
     private var devices: [MTDeviceRef] = []
-    private var tapDetector = TapDetector(tapTimeThreshold: 0.25, tapMovementThreshold: 0.08)
+    private let stateLock = NSLock()
+    private var compoundTapDetector: CompoundTapDetector
     private var isEnabled = true
-    private var activeTouch: Int32 = -1
-    private var touchStartX: Float = 0.0
-    private var touchStartY: Float = 0.0
-    private var rightClickThreshold: Float = 0.6  // X > 0.6 = right side
-    private var surfaceMovementThreshold: Float = 0.15  // Max finger movement on surface (0-1 scale)
+    private var lastRecognizedGesture: RecognizedGesture = .none
+    private var lastStatusSnapshot: GestureStatusSnapshot?
 
     fileprivate static var sharedInstance: MultitouchManager?
 
-    var onClickSynthesized: ((CGPoint, Bool) -> Void)?
+    var onGestureRecognized: ((CGPoint, CompoundGestureEvent) -> Void)?
+    var onStatusChanged: ((GestureStatusSnapshot) -> Void)?
 
-    init() {
+    init(configuration: CompoundGestureConfiguration = .default) {
+        compoundTapDetector = CompoundTapDetector(configuration: configuration)
         MultitouchManager.sharedInstance = self
     }
 
@@ -44,6 +62,7 @@ class MultitouchManager {
     }
 
     func stop() {
+        cancelGesture(reason: .disabled, touchCount: 0)
         for device in devices {
             MTUnregisterContactFrameCallback(device, touchCallback)
             MTDeviceStop(device)
@@ -52,70 +71,129 @@ class MultitouchManager {
     }
 
     func setEnabled(_ enabled: Bool) {
+        stateLock.lock()
         isEnabled = enabled
+        let event: CompoundGestureEvent?
+        if enabled {
+            compoundTapDetector.reset()
+            event = nil
+        } else {
+            event = compoundTapDetector.cancel(reason: .disabled)
+        }
+        if let event {
+            lastRecognizedGesture = recognizedGesture(for: event)
+        }
+        let status = makeStatus(touchCount: 0)
+        stateLock.unlock()
+
+        if let event {
+            emit(event)
+        }
+        publish(status)
     }
 
-    func processTouches(_ touches: UnsafeMutablePointer<MTTouch>, numTouches: Int, timestamp: Double) {
-        guard isEnabled else { return }
+    func updateConfiguration(_ configuration: CompoundGestureConfiguration) {
+        stateLock.lock()
+        let event = compoundTapDetector.updateConfiguration(configuration)
+        if let event {
+            lastRecognizedGesture = recognizedGesture(for: event)
+        }
+        let status = makeStatus(touchCount: 0)
+        stateLock.unlock()
 
-        if numTouches == 0 {
-            if activeTouch != -1 {
-                // Get cursor position directly from CGEvent (already in correct coordinate space)
-                let cgLocation = CGEvent(source: nil)?.location ?? CGPoint.zero
+        if let event {
+            emit(event)
+        }
+        publish(status)
+    }
 
-                if let tapLocation = tapDetector.touchEnded(at: cgLocation) {
-                    let isRightClick = touchStartX > rightClickThreshold
-                    onClickSynthesized?(tapLocation, isRightClick)
-                }
-                activeTouch = -1
-                touchStartX = 0.0
-                touchStartY = 0.0
-            }
+    func processTouches(_ touches: [CompoundTouch], timestamp: Double) {
+        stateLock.lock()
+        let enabled = isEnabled
+        let dragIsActive = compoundTapDetector.activeDragButton != nil
+        stateLock.unlock()
+
+        guard enabled else {
+            cancelGesture(reason: .disabled, touchCount: touches.count)
             return
         }
 
-        if numTouches == 1 {
-            let touch = touches[0]
-            // Get cursor position directly from CGEvent (already in correct coordinate space)
-            let cgLocation = CGEvent(source: nil)?.location ?? CGPoint.zero
+        let physicalButtonIsPressed =
+            CGEventSource.buttonState(.hidSystemState, button: .left) ||
+            CGEventSource.buttonState(.hidSystemState, button: .right)
 
-            if touch.state == 4 || touch.state == 7 {
-                if activeTouch == -1 {
-                    // New touch started - record starting position on surface
-                    activeTouch = touch.identifier
-                    touchStartX = touch.normalized.position.x
-                    touchStartY = touch.normalized.position.y
-                    tapDetector.touchBegan(at: cgLocation)
-                } else if activeTouch == touch.identifier {
-                    // Same touch continuing - check if finger moved too much on surface (scrolling)
-                    let deltaX = abs(touch.normalized.position.x - touchStartX)
-                    let deltaY = abs(touch.normalized.position.y - touchStartY)
-                    let surfaceMovement = max(deltaX, deltaY)
+        if physicalButtonIsPressed && !dragIsActive {
+            cancelGesture(reason: .physicalButtonPressed, touchCount: touches.count)
+            return
+        }
 
-                    if surfaceMovement > surfaceMovementThreshold {
-                        // Finger moved too much on surface - likely scrolling, cancel tap
-                        tapDetector.reset()
-                        activeTouch = -1
-                        touchStartX = 0.0
-                        touchStartY = 0.0
-                    } else {
-                        // Check cursor movement too
-                        let moved = tapDetector.touchMoved(to: cgLocation)
-                        if moved {
-                            activeTouch = -1
-                            touchStartX = 0.0
-                            touchStartY = 0.0
-                        }
-                    }
-                }
+        stateLock.lock()
+        let event = compoundTapDetector.process(touches: touches, timestamp: timestamp)
+        if let event {
+            lastRecognizedGesture = recognizedGesture(for: event)
+        }
+        let status = makeStatus(touchCount: touches.count)
+        stateLock.unlock()
+
+        if let event {
+            emit(event)
+        }
+        publish(status)
+    }
+
+    private func cancelGesture(reason: CompoundGestureCancellationReason, touchCount: Int) {
+        stateLock.lock()
+        let event = compoundTapDetector.cancel(reason: reason)
+        if let event {
+            lastRecognizedGesture = recognizedGesture(for: event)
+        }
+        let status = makeStatus(touchCount: touchCount)
+        stateLock.unlock()
+
+        if let event {
+            emit(event)
+        }
+        publish(status)
+    }
+
+    private func emit(_ event: CompoundGestureEvent) {
+        let cursorLocation = CGEvent(source: nil)?.location ?? CGPoint.zero
+        onGestureRecognized?(cursorLocation, event)
+    }
+
+    private func makeStatus(touchCount: Int) -> GestureStatusSnapshot {
+        GestureStatusSnapshot(
+            touchCount: touchCount,
+            state: compoundTapDetector.gestureState,
+            lastRecognizedGesture: lastRecognizedGesture,
+            cancellationReason: compoundTapDetector.lastCancellationReason
+        )
+    }
+
+    private func publish(_ status: GestureStatusSnapshot) {
+        stateLock.lock()
+        guard status != lastStatusSnapshot else {
+            stateLock.unlock()
+            return
+        }
+        lastStatusSnapshot = status
+        stateLock.unlock()
+        onStatusChanged?(status)
+    }
+
+    private func recognizedGesture(for event: CompoundGestureEvent) -> RecognizedGesture {
+        switch event {
+        case .click(let tap):
+            return tap.button == .left ? .leftClick : .rightClick
+        case .dragBegan:
+            return .dragStarted
+        case .dragEnded:
+            return .dropped
+        case .magnify(let magnification):
+            if magnification.phase == .ended {
+                return .zoomEnded
             }
-        } else if numTouches > 1 {
-            if activeTouch != -1 {
-                tapDetector.reset()
-                activeTouch = -1
-                touchStartX = 0.0
-                touchStartY = 0.0
-            }
+            return magnification.amount >= 0 ? .zoomIn : .zoomOut
         }
     }
 
@@ -125,8 +203,29 @@ class MultitouchManager {
 }
 
 private func touchCallback(device: Int32, touches: UnsafeMutablePointer<MTTouch>?, numTouches: Int32, timestamp: Double, frame: Int32) -> Int32 {
-    if let manager = MultitouchManager.sharedInstance, let touches = touches {
-        manager.processTouches(touches, numTouches: Int(numTouches), timestamp: timestamp)
+    guard let manager = MultitouchManager.sharedInstance else { return 0 }
+
+    var activeTouches: [CompoundTouch] = []
+    if let touches, numTouches > 0 {
+        for index in 0..<Int(numTouches) {
+            let touch = touches[index]
+
+            // MakeTouch and Touching are real surface contact. Hover, break,
+            // linger, and out-of-range frames must not become anchors.
+            guard touch.state == 3 || touch.state == 4 else { continue }
+
+            activeTouches.append(
+                CompoundTouch(
+                    identifier: touch.identifier,
+                    position: CGPoint(
+                        x: CGFloat(touch.normalized.position.x),
+                        y: CGFloat(touch.normalized.position.y)
+                    )
+                )
+            )
+        }
     }
+
+    manager.processTouches(activeTouches, timestamp: timestamp)
     return 0
 }

@@ -1,20 +1,19 @@
 #!/bin/bash
 
-# Test runner script for Mouse Toucher
+# Test runner script for Mouse Toucher. This intentionally uses only the Swift
+# compiler so it also works with Apple's Command Line Tools (without Xcode).
 
-echo "=== Mouse Toucher Test Suite ==="
-echo ""
+set -euo pipefail
 
-# Run tests using Swift Package Manager
-echo "🧪 Running tests with Swift Package Manager..."
-swift test
+TEST_BUILD_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_BUILD_DIR"' EXIT
 
-if [ $? -eq 0 ]; then
-    echo ""
-    echo "🎉 All tests passed!"
-    exit 0
-else
-    echo ""
-    echo "💔 Some tests failed"
-    exit 1
-fi
+swiftc \
+    Sources/MouseToucherLib/CompoundTapDetector.swift \
+    MouseToucherSettings.swift \
+    DragEventMonitor.swift \
+    NativeMagnificationEmitter.swift \
+    Tests/CompoundTapDetectorTests.swift \
+    -o "$TEST_BUILD_DIR/MouseToucherLogicTests"
+
+"$TEST_BUILD_DIR/MouseToucherLogicTests"

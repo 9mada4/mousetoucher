@@ -15,14 +15,7 @@ let package = Package(
     targets: [
         .target(
             name: "MouseToucherLib",
-            dependencies: [],
-            path: "Sources",
-            sources: ["TapDetector.swift", "AppDelegate.swift"]
-        ),
-        .testTarget(
-            name: "MouseToucherTests",
-            dependencies: ["MouseToucherLib"],
-            path: "Tests"
+            dependencies: []
         )
     ]
 )
