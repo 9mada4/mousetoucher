@@ -6,7 +6,7 @@
   <img alt="Mouse Toucher Logo" src="mousetoucher-light.png">
 </picture>
 
-**Intentional tap-to-click, native pinch zoom, and drag for your Apple Magic Mouse.** (v2.0)
+**Intentional tap-to-click, native pinch zoom, and drag for your Apple Magic Mouse.** (v2.2)
 
 Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse. Keep one finger still as an anchor, then tap with another finger to click without pressing the mouse surface down. A single resting finger never clicks by itself.
 
@@ -22,6 +22,7 @@ Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse.
 - 🎯 **Easy toggle** on/off from the menu bar
 - 🔄 **One-click restart** from the menu bar
 - ⚙️ **Live settings** for tap time, movement tolerance, left/right boundary, and three-finger drag
+- 🪟 **Drag compatibility** lets you choose the original macOS 26 behavior or the macOS 27 window-dragging path
 - 🧩 **macOS-version presets** automatically select the exact preset for the running OS
 - 📊 **Live status** shows touch count, recognition state, last gesture, and cancellation reason
 - 🚀 **Launch at login** can be controlled from the app on macOS 13 or later
@@ -38,13 +39,13 @@ Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse.
 
 ### Install the Pre-Built App (Recommended)
 
-No Xcode or Terminal commands are required. The repository includes a universal app that works on both Apple Silicon and Intel Macs.
+No Xcode or Terminal commands are required. The included MouseToucher 2.2 app is an Apple Silicon build. Intel Macs can build from source using a toolchain with Intel compatibility libraries, such as the macOS 26 Command Line Tools.
 
 1. Download the [current repository as a ZIP](https://github.com/9mada4/mousetoucher/archive/refs/heads/main.zip)
 2. Double-click `mousetoucher-main.zip` to extract it
 3. Open the extracted `mousetoucher-main` folder, then open `build`
-4. Drag **MouseToucher 2.0.app** into your **Applications** folder
-5. In **Applications**, Control-click **MouseToucher 2.0** and choose **Open**
+4. Drag **MouseToucher 2.2.app** into your **Applications** folder
+5. In **Applications**, Control-click **MouseToucher 2.2** and choose **Open**
 6. Confirm **Open** when macOS asks, then complete the Accessibility steps below
 
 Copy the app to **Applications before opening it** so that macOS registers and grants permission to the installed copy.
@@ -55,8 +56,8 @@ Copy the app to **Applications before opening it** so that macOS registers and g
 ```bash
 git clone https://github.com/9mada4/mousetoucher.git
 cd mousetoucher
-ditto "build/MouseToucher 2.0.app" "/Applications/MouseToucher 2.0.app"
-open "/Applications/MouseToucher 2.0.app"
+ditto "build/MouseToucher 2.2.app" "/Applications/MouseToucher 2.2.app"
+open "/Applications/MouseToucher 2.2.app"
 ```
 
 </details>
@@ -69,19 +70,25 @@ Apple's Command Line Tools are required. If `swiftc --version` is unavailable, r
 git clone https://github.com/9mada4/mousetoucher.git
 cd mousetoucher
 ./build.sh
-ditto "build/MouseToucher 2.0.app" "/Applications/MouseToucher 2.0.app"
-open "/Applications/MouseToucher 2.0.app"
+ditto "build/MouseToucher 2.2.app" "/Applications/MouseToucher 2.2.app"
+open "/Applications/MouseToucher 2.2.app"
 ```
 
-`build.sh` compiles Apple Silicon and Intel executables, combines them into a universal app, and ad-hoc signs the completed bundle.
+By default, `build.sh` compiles Apple Silicon and Intel executables, combines them into a universal app, and ad-hoc signs the completed bundle. A native Apple Silicon build is also available:
+
+```bash
+ARCHS=arm64 ./build.sh
+```
+
+The macOS 27 Command Line Tools on the development Mac lack Intel slices in the Swift compatibility libraries needed for the macOS 11 deployment target. The included app was built with `ARCHS=arm64`; universal builds require a toolchain that supplies those Intel libraries. The source retains the macOS 11 minimum and the macOS 26 gesture path.
 
 ### First Launch and Accessibility Permission
 
-1. Open **MouseToucher 2.0** from **Applications**
+1. Open **MouseToucher 2.2** from **Applications**
 2. In the permission message, click **Open System Settings**
-3. In **Privacy & Security → Accessibility**, enable **MouseToucher 2.0**
-4. If it is not listed, click **+** and select `/Applications/MouseToucher 2.0.app`
-5. Return to MouseToucher 2.0; it starts working as soon as permission is enabled and **Compound Tap** is on
+3. In **Privacy & Security → Accessibility**, enable **MouseToucher 2.2**
+4. If it is not listed, click **+** and select `/Applications/MouseToucher 2.2.app`
+5. Return to MouseToucher 2.2; it starts working as soon as permission is enabled and **Compound Tap** is on
 
 The app runs in the menu bar rather than the Dock. Look for the mouse icon near the top-right of the screen.
 
@@ -116,13 +123,22 @@ MouseToucher stores settings outside the version-specific app identifier, so the
 - adjust tap duration, movement tolerance, and the left/right click boundary
 - enable native pinch zoom and adjust its start distance and sensitivity
 - enable or disable three-finger drag
+- select **ドラッグ互換性**: automatic, macOS 26 and earlier, or macOS 27 and later
 - see the current touch count, recognition state, last gesture, and cancellation reason
 - add a preset for any past or future macOS version
 - choose a default preset used as the template when an unregistered macOS version is detected
 - copy any preset to the currently running macOS version for immediate use
 - reset an individual preset to the initial values
 
-At launch, MouseToucher reads the exact system version. If a matching preset exists it is applied automatically. After an OS upgrade or downgrade, a new exact-version preset is created from the selected default and then applied.
+At launch, MouseToucher reads the exact system version. If a matching preset exists it is applied automatically. After an OS upgrade or downgrade, a new exact-version preset copies tuning values from the selected default and sets drag compatibility to automatic for the new OS. Existing presets and explicit compatibility choices are preserved.
+
+To use the old behavior on macOS 27, select the preset marked **現在** and set **ドラッグ互換性 → macOS 26以前（従来方式）**. This takes effect immediately and survives restarting the app. Choose **自動** or **macOS 27以降** to use the new window-dragging path. Changing this setting ends any active drag safely. Editing a different OS preset only changes that saved preset; use **現在のOSへ適用** to activate it.
+
+The macOS 26 path keeps the original session-level mouse-move conversion. The macOS 27 path converts movement at the HID event tap, before WindowServer handles window movement, and also accepts existing dragged events. It keeps hardware movement enabled during the synthetic drag and suppresses incidental scrolling while dragging. The three-finger gesture itself is unchanged: place three fingers to begin and lift every finger to drop. Settings shows **ドラッグ入力** availability so a failed event tap is visible.
+
+For macOS 27 title bars, MouseToucher 2.2 moves the selected window directly through Accessibility instead of relying on synthesized mouse drags to move windows. The target is locked when three fingers land, follows physical mouse displacement, and releases when all fingers lift. Buttons, tabs, fields, and document content keep the ordinary drag path; full-screen windows and windows that reject position changes are excluded. This path does not provide native edge snapping or dragging between Spaces. **最後のドラッグ方式** shows whether the title-bar path was selected and reports a failed position update. MouseToucher's own Settings window uses AppKit for the same movement to avoid sending Accessibility requests back to its own main thread.
+
+Presets saved by older builds retain their tuning. Old presets for macOS 26 and earlier use the legacy path; old macOS 27 presets start with automatic compatibility.
 
 ### Tips
 
@@ -146,7 +162,7 @@ On macOS 13 or later:
 
 1. Open **Settings** from the MouseToucher menu-bar icon
 2. Turn on **Launch at login**
-3. If macOS asks for approval, allow **MouseToucher 2.0** in **System Settings → General → Login Items**
+3. If macOS asks for approval, allow **MouseToucher 2.2** in **System Settings → General → Login Items**
 
 The same switch removes the login item when turned off.
 
@@ -180,8 +196,8 @@ These permissions are granted by you in System Settings and can be revoked at an
 
 **Check permissions:**
 1. Go to **System Settings → Privacy & Security → Accessibility**
-2. Make sure **MouseToucher 2.0** is in the list and **checked** ✓
-3. If it disappeared (after rebuilding), click **+** and re-add `/Applications/MouseToucher 2.0.app`
+2. Make sure **MouseToucher 2.2** is in the list and **checked** ✓
+3. If it disappeared (after rebuilding), click **+** and re-add `/Applications/MouseToucher 2.2.app`
 4. Toggle the checkbox off/on once — the app will detect the change immediately
 
 **Verify Magic Mouse:**
@@ -193,7 +209,7 @@ These permissions are granted by you in System Settings and can be revoked at an
 
 MouseToucher is ad-hoc signed and is not notarized or distributed through the Mac App Store, so macOS may block the first launch.
 
-1. In **Applications**, Control-click **MouseToucher 2.0** and choose **Open**
+1. In **Applications**, Control-click **MouseToucher 2.2** and choose **Open**
 2. Click **Open** in the confirmation dialog
 3. If macOS still blocks it, open **System Settings → Privacy & Security**, find the MouseToucher message, and click **Open Anyway**
 
@@ -207,13 +223,13 @@ To remove MouseToucher:
 
 ```bash
 # Remove the app
-trash "/Applications/MouseToucher 2.0.app"
+trash "/Applications/MouseToucher 2.2.app"
 
 # Remove from Login Items (if you added it)
 # Or turn off Launch at login in MouseToucher Settings before removing the app
 
 # Revoke permissions (optional)
-# System Settings → Privacy & Security → Accessibility → Remove MouseToucher 2.0
+# System Settings → Privacy & Security → Accessibility → Remove MouseToucher 2.2
 ```
 
 ## 💬 Feedback & Support

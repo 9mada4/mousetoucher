@@ -349,6 +349,193 @@ private func testOSPresetsFollowCurrentSystemVersion() throws {
     try expectEqual(afterUpgrade.activeConfiguration, .default)
 }
 
+private func testDragCompatibilitySelection() throws {
+    try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 11), .macOS26)
+    try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 26), .macOS26)
+    try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 27), .macOS27)
+    try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 28), .macOS27)
+    try expectEqual(DragCompatibilityMode.macOS26.resolved(systemMajorVersion: 27), .macOS26)
+    try expectEqual(DragCompatibilityMode.macOS27.resolved(systemMajorVersion: 26), .macOS27)
+}
+
+private func testOldPresetsMigrateWithoutLosingTuning() throws {
+    let suiteName = "com.mousetoucher.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let oldJSON = """
+    [
+      {"osVersion":"26.6.0","tapTimeThreshold":0.37,"movementThreshold":0.06,"rightClickSplit":0.65,"isThreeFingerDragEnabled":true},
+      {"osVersion":"27.0.0","tapTimeThreshold":0.42,"movementThreshold":0.03,"rightClickSplit":0.55,"isThreeFingerDragEnabled":false,"isPinchZoomEnabled":false,"pinchStartThreshold":0.05,"pinchSensitivity":2.0}
+    ]
+    """
+    defaults.set(Data(oldJSON.utf8), forKey: "osGesturePresets")
+    defaults.set("26.6.0", forKey: "defaultPresetVersion")
+    let settings = MouseToucherSettings(defaults: defaults, currentOSVersion: "27.0.0")
+    try expectEqual(settings.configuration(for: "26.6.0")?.dragCompatibility, .macOS26)
+    try expectEqual(settings.configuration(for: "26.6.0")?.tapTimeThreshold, 0.37)
+    try expectEqual(settings.activeConfiguration.dragCompatibility, .automatic)
+    try expectEqual(settings.activeConfiguration.tapTimeThreshold, 0.42)
+    try expectEqual(settings.activeConfiguration.isThreeFingerDragEnabled, false)
+    try expectEqual(settings.activeConfiguration.isPinchZoomEnabled, false)
+    try expectEqual(settings.activeConfiguration.pinchSensitivity, 2)
+    try expectEqual(settings.defaultPresetVersion, "26.6.0")
+    let reloaded = MouseToucherSettings(defaults: defaults, currentOSVersion: "27.0.0")
+    try expectEqual(reloaded.activeConfiguration, settings.activeConfiguration)
+    try expectEqual(reloaded.configuration(for: "26.6.0"), settings.configuration(for: "26.6.0"))
+}
+
+private func testExplicitLegacyModePersistsAndAppliesOn27() throws {
+    let suiteName = "com.mousetoucher.tests.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let settings = MouseToucherSettings(defaults: defaults, currentOSVersion: "26.6.0")
+    var legacy = settings.activeConfiguration
+    legacy.dragCompatibility = .macOS26
+    legacy.tapTimeThreshold = 0.36
+    _ = settings.updateConfiguration(legacy, for: "26.6.0")
+    let upgraded = MouseToucherSettings(defaults: defaults, currentOSVersion: "27.0.0")
+    try expectEqual(upgraded.activeConfiguration.dragCompatibility, .automatic)
+    try expectEqual(upgraded.activeConfiguration.tapTimeThreshold, 0.36)
+    try expectEqual(upgraded.configuration(for: "26.6.0"), legacy)
+    try expectEqual(upgraded.applyPresetToCurrentOS(version: "26.6.0"), legacy)
+    let reloaded = MouseToucherSettings(defaults: defaults, currentOSVersion: "27.0.0")
+    try expectEqual(reloaded.activeConfiguration, legacy)
+    _ = reloaded.resetPreset(version: "27.0.0")
+    try expectEqual(reloaded.activeConfiguration.dragCompatibility, .automatic)
+}
+
+private func testCompatibilitySwitchEndsDragExactlyOnce() throws {
+    let detector = makeDetector()
+    _ = detector.process(touches: [anchor, touch(identifier: 2, x: 0.25), touch(identifier: 3, x: 0.75)], timestamp: 0)
+    var changed = detector.configuration
+    changed.dragCompatibility = .macOS26
+    try expectEqual(detector.updateConfiguration(changed), .dragEnded(.left))
+    try expectEqual(detector.lastCancellationReason, .settingsChanged)
+    try expectNil(detector.updateConfiguration(changed))
+    try expectNil(detector.process(touches: [], timestamp: 0.1))
+}
+
+private func testModernDragRunsBeforeWindowServerHandling() throws {
+    try expectEqual(DragMotionEventMapper.tapLocation(for: .macOS27), .cghidEventTap)
+    try expectEqual(DragMotionEventMapper.tapLocation(for: .macOS26), .cgSessionEventTap)
+    for type: CGEventType in [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged] {
+        try expectEqual(DragMotionEventMapper.accepts(type, mode: .macOS27), true)
+        try expectEqual(DragMotionEventMapper.eventMask(for: .macOS27) & (1 << type.rawValue) != 0, true)
+        try expectEqual(DragMotionEventMapper.accepts(type, mode: .macOS26), type == .mouseMoved)
+    }
+    for type: CGEventType in [.leftMouseDown, .leftMouseUp, .scrollWheel, .keyDown] {
+        try expectEqual(DragMotionEventMapper.accepts(type, mode: .macOS27), false)
+    }
+}
+
+private func testModernDragKeepsHardwareInputEnabled() throws {
+    let factory = DragMouseEventFactory(mode: .macOS27)
+    guard let source = factory.source else {
+        throw TestFailure(description: "Could not create modern drag source")
+    }
+    try expectEqual(source.localEventsSuppressionInterval, 0)
+    for state: CGEventSuppressionState in [.eventSuppressionStateSuppressionInterval, .eventSuppressionStateRemoteMouseDrag] {
+        let allowed = source.getLocalEventsFilterDuringSuppressionState(state)
+        try expectEqual(allowed.contains(.permitLocalMouseEvents), true)
+        try expectEqual(allowed.contains(.permitLocalKeyboardEvents), true)
+    }
+    try expectNil(DragMouseEventFactory(mode: .macOS26).source)
+}
+
+private func testDragEventsPreserveMotionAndPairButtons() throws {
+    for mode: DragCompatibilityMode in [.macOS26, .macOS27] {
+        let factory = DragMouseEventFactory(mode: mode)
+        for button: CompoundTapButton in [.left, .right] {
+            let point = CGPoint(x: -250, y: 140)
+            guard let down = factory.buttonEvent(isDown: true, at: point, button: button, clickCount: 1),
+                  let up = factory.buttonEvent(isDown: false, at: point, button: button, clickCount: 1),
+                  let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) else {
+                throw TestFailure(description: "Could not create drag events")
+            }
+            move.setIntegerValueField(.mouseEventDeltaX, value: -8)
+            move.setIntegerValueField(.mouseEventDeltaY, value: 12)
+            move.flags = [.maskShift, .maskAlternate]
+            let timestamp = move.timestamp
+            factory.convertMotion(move, button: button, clickCount: 1)
+            try expectEqual(move.type, button == .left ? .leftMouseDragged : .rightMouseDragged)
+            try expectEqual(move.location, point)
+            try expectEqual(move.timestamp, timestamp)
+            try expectEqual(move.flags, [.maskShift, .maskAlternate])
+            try expectEqual(move.getIntegerValueField(.mouseEventDeltaX), -8)
+            try expectEqual(move.getIntegerValueField(.mouseEventDeltaY), 12)
+            try expectEqual(move.getIntegerValueField(.mouseEventButtonNumber), button == .left ? 0 : 1)
+            try expectEqual(down.type, button == .left ? .leftMouseDown : .rightMouseDown)
+            try expectEqual(up.type, button == .left ? .leftMouseUp : .rightMouseUp)
+            try expectEqual(down.getIntegerValueField(.eventSourceStateID), up.getIntegerValueField(.eventSourceStateID))
+            if mode == .macOS27 {
+                try expectEqual(move.getIntegerValueField(.eventSourceStateID), down.getIntegerValueField(.eventSourceStateID))
+            }
+        }
+    }
+}
+
+private final class FakeWindowDragTarget: WindowDragTarget {
+    let origin: CGPoint
+    var positions: [CGPoint] = []
+    var acceptsMovement = true
+    init(origin: CGPoint) { self.origin = origin }
+    func move(to point: CGPoint) -> Bool {
+        positions.append(point)
+        return acceptsMovement
+    }
+}
+
+private func testWindowDragRejectsControlsAndContent() throws {
+    let frame = CGRect(x: 100, y: 100, width: 800, height: 600)
+    let cursor = CGPoint(x: 300, y: 112)
+    try expectEqual(WindowDragGeometry.isTitleBarHit(cursor: cursor, frame: frame, closeButtonFrame: nil, roles: ["AXWindow"]), true)
+    for role in ["AXButton", "AXTextField", "AXTabGroup", "AXRadioButton", "AXScrollArea", "AXWebArea", "AXUnknown"] {
+        try expectEqual(WindowDragGeometry.isTitleBarHit(cursor: cursor, frame: frame, closeButtonFrame: nil, roles: ["AXStaticText", role, "AXWindow"]), false)
+    }
+    try expectEqual(WindowDragGeometry.isTitleBarHit(cursor: CGPoint(x: 300, y: 200), frame: frame, closeButtonFrame: nil, roles: ["AXGroup", "AXWindow"]), false)
+    try expectEqual(WindowDragGeometry.isTitleBarHit(cursor: CGPoint(x: 20, y: 112), frame: frame, closeButtonFrame: nil, roles: ["AXWindow"]), false)
+    try expectEqual(WindowDragGeometry.isTitleBarHit(cursor: cursor, frame: frame, closeButtonFrame: nil, roles: []), false)
+}
+
+private func testUnifiedTitleBarAndNegativeCoordinates() throws {
+    let frame = CGRect(x: -1000, y: -500, width: 800, height: 600)
+    let close = CGRect(x: -988, y: -479, width: 14, height: 14)
+    try expectEqual(WindowDragGeometry.isTitleBarHit(cursor: CGPoint(x: -800, y: -455), frame: frame, closeButtonFrame: close, roles: ["AXStaticText", "AXToolbar", "AXWindow"]), true)
+    try expectEqual(WindowDragGeometry.isTitleBarHit(cursor: CGPoint(x: -800, y: -400), frame: frame, closeButtonFrame: close, roles: ["AXWindow"]), false)
+}
+
+private func testWindowDragFollowsCursorWithoutAccumulatedDrift() throws {
+    let target = FakeWindowDragTarget(origin: CGPoint(x: -900, y: -400))
+    let session = WindowDragSession()
+    session.begin(target: target, cursor: CGPoint(x: -800, y: -386))
+    try expectEqual(session.update(cursor: CGPoint(x: -700, y: -286)), true)
+    try expectEqual(target.positions.last, CGPoint(x: -800, y: -300))
+    try expectEqual(session.update(cursor: CGPoint(x: -750, y: -336)), true)
+    try expectEqual(target.positions.last, CGPoint(x: -850, y: -350))
+    _ = session.update(cursor: CGPoint(x: -750, y: -336))
+    try expectEqual(target.positions.count, 2)
+    session.end()
+    session.end()
+    try expectEqual(session.update(cursor: .zero), false)
+    try expectEqual(target.positions.count, 2)
+}
+
+private func testWindowDragStopsAfterTargetFailure() throws {
+    let target = FakeWindowDragTarget(origin: .zero)
+    let session = WindowDragSession()
+    session.begin(target: target, cursor: .zero)
+    target.acceptsMovement = false
+    try expectEqual(session.update(cursor: CGPoint(x: 30, y: 20)), false)
+    try expectEqual(session.isActive, false)
+    try expectEqual(session.update(cursor: CGPoint(x: 90, y: 20)), false)
+    try expectEqual(target.positions.count, 1)
+    let next = FakeWindowDragTarget(origin: CGPoint(x: 200, y: 100))
+    session.begin(target: next, cursor: CGPoint(x: 300, y: 110))
+    _ = session.update(cursor: CGPoint(x: 310, y: 110))
+    try expectEqual(next.positions.last, CGPoint(x: 210, y: 100))
+    try expectEqual(target.positions.count, 1)
+}
+
 private func testPinchProducesContinuousMagnification() throws {
     let detector = makeDetector()
     let secondFinger = touch(identifier: 2, x: 0.70)
@@ -543,6 +730,17 @@ private enum CompoundTapTestRunner {
             ("disabled drag reports its reason", testDisabledThreeFingerDragReportsReason),
             ("configuration change ends drag", testConfigurationChangeEndsActiveDrag),
             ("OS presets follow the current version", testOSPresetsFollowCurrentSystemVersion),
+            ("compatibility follows OS or explicit override", testDragCompatibilitySelection),
+            ("old presets migrate without losing tuning", testOldPresetsMigrateWithoutLosingTuning),
+            ("legacy mode persists and applies on macOS 27", testExplicitLegacyModePersistsAndAppliesOn27),
+            ("compatibility switch ends drag exactly once", testCompatibilitySwitchEndsDragExactlyOnce),
+            ("modern drag precedes WindowServer handling", testModernDragRunsBeforeWindowServerHandling),
+            ("modern drag permits hardware input", testModernDragKeepsHardwareInputEnabled),
+            ("drag events preserve motion and pair buttons", testDragEventsPreserveMotionAndPairButtons),
+            ("window dragging excludes controls and document content", testWindowDragRejectsControlsAndContent),
+            ("unified title bars support negative screen coordinates", testUnifiedTitleBarAndNegativeCoordinates),
+            ("window position follows cursor and stops on release", testWindowDragFollowsCursorWithoutAccumulatedDrift),
+            ("failed window movement stops without retargeting", testWindowDragStopsAfterTargetFailure),
             ("pinch produces continuous magnification", testPinchProducesContinuousMagnification),
             ("pinch contraction zooms out", testPinchContractionProducesZoomOut),
             ("simultaneous touches can only pinch", testSimultaneousTouchesCanPinchButNeverClick),

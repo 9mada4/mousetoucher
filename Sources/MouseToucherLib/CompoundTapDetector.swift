@@ -6,6 +6,24 @@ enum CompoundTapButton: Equatable {
     case right
 }
 
+enum DragCompatibilityMode: String, Codable, CaseIterable {
+    case automatic
+    case macOS26
+    case macOS27
+
+    func resolved(systemMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> Self {
+        self == .automatic ? (systemMajorVersion >= 27 ? .macOS27 : .macOS26) : self
+    }
+
+    var displayName: String {
+        switch self {
+        case .automatic: return "自動（現在のmacOSに合わせる）"
+        case .macOS26: return "macOS 26以前（従来方式）"
+        case .macOS27: return "macOS 27以降"
+        }
+    }
+}
+
 struct CompoundGestureConfiguration: Equatable {
     static let defaultTapTimeThreshold: TimeInterval = 0.28
     static let defaultMovementThreshold: CGFloat = 0.04
@@ -30,6 +48,7 @@ struct CompoundGestureConfiguration: Equatable {
     var isPinchZoomEnabled: Bool
     var pinchStartThreshold: CGFloat
     var pinchSensitivity: CGFloat
+    var dragCompatibility: DragCompatibilityMode = .automatic
 
     var normalized: CompoundGestureConfiguration {
         CompoundGestureConfiguration(
@@ -39,7 +58,8 @@ struct CompoundGestureConfiguration: Equatable {
             isThreeFingerDragEnabled: isThreeFingerDragEnabled,
             isPinchZoomEnabled: isPinchZoomEnabled,
             pinchStartThreshold: min(max(pinchStartThreshold, 0.01), 0.08),
-            pinchSensitivity: min(max(pinchSensitivity, 0.25), 3.0)
+            pinchSensitivity: min(max(pinchSensitivity, 0.25), 3.0),
+            dragCompatibility: dragCompatibility
         )
     }
 }

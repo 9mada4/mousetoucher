@@ -1,15 +1,25 @@
 #!/bin/bash
 
 # Build script for Mouse Toucher app (Production)
+set -euo pipefail
 
-APP_NAME="MouseToucher 2.0"
+# Universal by default. Use ARCHS=arm64 with toolchains lacking Intel runtimes.
+read -r -a ARCHITECTURES <<< "${ARCHS:-arm64 x86_64}"
+for architecture in "${ARCHITECTURES[@]}"; do
+    case "$architecture" in
+        arm64|x86_64) ;;
+        *) echo "Unsupported architecture: $architecture"; exit 1 ;;
+    esac
+done
+
+APP_NAME="MouseToucher 2.2"
 BUILD_DIR="build"
 APP_PATH="$BUILD_DIR/$APP_NAME.app"
 ICON_SOURCE="Assets/AppIcon.png"
 ICONSET_PATH="$BUILD_DIR/AppIcon.iconset"
 
 echo "=========================================="
-echo "Building Mouse Toucher (Universal Binary)"
+echo "Building Mouse Toucher (${ARCHITECTURES[*]})"
 echo "=========================================="
 
 # Clean previous build
@@ -41,70 +51,36 @@ sips -z 1024 1024 "$ICON_SOURCE" --out "$ICONSET_PATH/icon_512x512@2x.png" >/dev
 iconutil -c icns "$ICONSET_PATH" -o "$APP_PATH/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET_PATH"
 
-# Compile for Apple Silicon (arm64)
-echo "📦 Compiling for Apple Silicon (arm64)..."
-swiftc -o "$BUILD_DIR/${APP_NAME}_arm64" \
-    -target arm64-apple-macos11.0 \
-    -import-objc-header MultitouchBridge.h \
-    -framework Cocoa \
-    -framework ApplicationServices \
-    -framework ServiceManagement \
-    -F /System/Library/PrivateFrameworks \
-    -framework MultitouchSupport \
-    -Xlinker -rpath -Xlinker /System/Library/PrivateFrameworks \
-    Sources/MouseToucherLib/CompoundTapDetector.swift \
-    MouseToucherSettings.swift \
-    DragEventMonitor.swift \
-    NativeMagnificationEmitter.swift \
-    MultitouchManager.swift \
-    SettingsWindowController.swift \
-    AppDelegate.swift \
-    main.swift
+# Compile each requested architecture. Both use the same sources and minimum OS.
+BINARIES=()
+for architecture in "${ARCHITECTURES[@]}"; do
+    echo "📦 Compiling for $architecture..."
+    BINARY_PATH="$BUILD_DIR/${APP_NAME}_$architecture"
+    swiftc -o "$BINARY_PATH" \
+        -target "$architecture-apple-macos11.0" \
+        -import-objc-header MultitouchBridge.h \
+        -framework Cocoa \
+        -framework ApplicationServices \
+        -framework ServiceManagement \
+        -F /System/Library/PrivateFrameworks \
+        -framework MultitouchSupport \
+        -Xlinker -rpath -Xlinker /System/Library/PrivateFrameworks \
+        Sources/MouseToucherLib/CompoundTapDetector.swift \
+        MouseToucherSettings.swift \
+        DragEventMonitor.swift \
+        WindowDragController.swift \
+        NativeMagnificationEmitter.swift \
+        MultitouchManager.swift \
+        SettingsWindowController.swift \
+        AppDelegate.swift \
+        main.swift
+    BINARIES+=("$BINARY_PATH")
+done
 
-if [ $? -ne 0 ]; then
-    echo "❌ arm64 compilation failed!"
-    exit 1
-fi
-
-# Compile for Intel (x86_64)
-echo "📦 Compiling for Intel (x86_64)..."
-swiftc -o "$BUILD_DIR/${APP_NAME}_x86_64" \
-    -target x86_64-apple-macos11.0 \
-    -import-objc-header MultitouchBridge.h \
-    -framework Cocoa \
-    -framework ApplicationServices \
-    -framework ServiceManagement \
-    -F /System/Library/PrivateFrameworks \
-    -framework MultitouchSupport \
-    -Xlinker -rpath -Xlinker /System/Library/PrivateFrameworks \
-    Sources/MouseToucherLib/CompoundTapDetector.swift \
-    MouseToucherSettings.swift \
-    DragEventMonitor.swift \
-    NativeMagnificationEmitter.swift \
-    MultitouchManager.swift \
-    SettingsWindowController.swift \
-    AppDelegate.swift \
-    main.swift
-
-if [ $? -ne 0 ]; then
-    echo "❌ x86_64 compilation failed!"
-    exit 1
-fi
-
-# Create universal binary
-echo "🔗 Creating universal binary..."
-lipo -create \
-    "$BUILD_DIR/${APP_NAME}_arm64" \
-    "$BUILD_DIR/${APP_NAME}_x86_64" \
-    -output "$APP_PATH/Contents/MacOS/$APP_NAME"
-
-if [ $? -ne 0 ]; then
-    echo "❌ Failed to create universal binary!"
-    exit 1
-fi
-
-# Clean up temporary files
-rm "$BUILD_DIR/${APP_NAME}_arm64" "$BUILD_DIR/${APP_NAME}_x86_64"
+# lipo also accepts a single architecture for a native-only build.
+echo "🔗 Creating application executable..."
+lipo -create "${BINARIES[@]}" -output "$APP_PATH/Contents/MacOS/$APP_NAME"
+rm "${BINARIES[@]}"
 
 # Copy Info.plist
 cp Info.plist "$APP_PATH/Contents/"
@@ -122,11 +98,11 @@ fi
 
 echo ""
 echo "=========================================="
-echo "✅ UNIVERSAL BINARY BUILD COMPLETE!"
+echo "✅ BUILD COMPLETE!"
 echo "=========================================="
 echo ""
 echo "App location: $APP_PATH"
-echo "Architectures: arm64 (Apple Silicon) + x86_64 (Intel)"
+lipo -info "$APP_PATH/Contents/MacOS/$APP_NAME"
 echo ""
 echo "To run the app:"
 echo "  open \"$APP_PATH\""
