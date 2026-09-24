@@ -37,7 +37,7 @@ Mouse Toucher adds a deliberate two-finger tap gesture to the Apple Magic Mouse.
 
 ## 🚀 Installation
 
-### Install the Pre-Built App (Recommended)
+### Install the Pre-Built App (Easy)
 
 No Xcode or Terminal commands are required. The included MouseToucher 2.2 app is an Apple Silicon build. Intel Macs can build from source using a toolchain with Intel compatibility libraries, such as the macOS 26 Command Line Tools.
 
@@ -62,7 +62,7 @@ open "/Applications/MouseToucher 2.2.app"
 
 </details>
 
-### Build From Source
+### Build From Source (Recommended)
 
 Apple's Command Line Tools are required. If `swiftc --version` is unavailable, run `xcode-select --install` first. Then build and install the app:
 
