@@ -26,6 +26,10 @@ enum DragMotionEventMapper {
     static func buttonNumber(for button: CompoundTapButton) -> Int64 {
         Int64(button == .right ? CGMouseButton.right.rawValue : CGMouseButton.left.rawValue)
     }
+
+    static func postLocation(for mode: DragCompatibilityMode) -> CGEventTapLocation {
+        mode.resolved() == .macOS27 ? .cgSessionEventTap : .cghidEventTap
+    }
 }
 
 /// A single source pairs the down/move/up events of a modern drag. Explicitly
@@ -72,8 +76,26 @@ final class DragMouseEventFactory {
             event.setSource(source)
         }
         event.type = DragMotionEventMapper.eventType(for: button)
+        // Changing only the event type leaves mouseMoved's up-state pressure (0)
+        // on a dragged event. System drag handlers expect a held button here.
+        event.setDoubleValueField(.mouseEventPressure, value: 1.0)
         event.setIntegerValueField(.mouseEventButtonNumber, value: DragMotionEventMapper.buttonNumber(for: button))
         event.setIntegerValueField(.mouseEventClickState, value: clickCount)
+    }
+
+    /// Hammerspoon creates a new mouse event for each drag position and posts
+    /// it at the session tap. Do not mutate the physical HID motion event.
+    func freshDragEvent(from motion: CGEvent, button: CompoundTapButton, clickCount: Int64) -> CGEvent? {
+        guard let event = CGEvent(
+            mouseEventSource: source,
+            mouseType: DragMotionEventMapper.eventType(for: button),
+            mouseCursorPosition: motion.location,
+            mouseButton: button == .right ? .right : .left
+        ) else { return nil }
+        event.flags = motion.flags
+        event.setIntegerValueField(.mouseEventClickState, value: clickCount)
+        event.setDoubleValueField(.mouseEventPressure, value: 1.0)
+        return event
     }
 }
 
@@ -140,6 +162,10 @@ final class DragEventMonitor {
 
     func buttonEvent(isDown: Bool, at location: CGPoint, button: CompoundTapButton, clickCount: Int64) -> CGEvent? {
         eventFactory.buttonEvent(isDown: isDown, at: location, button: button, clickCount: clickCount)
+    }
+
+    var eventPostLocation: CGEventTapLocation {
+        DragMotionEventMapper.postLocation(for: compatibilityMode)
     }
 
     func end() {
@@ -210,6 +236,14 @@ final class DragEventMonitor {
 
         guard let drag else {
             return Unmanaged.passUnretained(event)
+        }
+
+        if compatibilityMode == .macOS27 {
+            guard let freshEvent = eventFactory.freshDragEvent(
+                from: event, button: drag.button, clickCount: drag.clickCount
+            ) else { return Unmanaged.passUnretained(event) }
+            freshEvent.post(tap: .cgSessionEventTap)
+            return nil
         }
 
         eventFactory.convertMotion(event, button: drag.button, clickCount: drag.clickCount)

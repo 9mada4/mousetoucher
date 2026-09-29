@@ -51,7 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasShownAccessibilityInstructions = true
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "MouseToucher 2.3 needs accessibility permissions to simulate clicks and native pinch gestures.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 2.3. The app will begin working as soon as permission is granted."
+        alert.informativeText = "MouseToucher 2.6 needs accessibility permissions to simulate clicks and native pinch gestures.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 2.6. The app will begin working as soon as permission is granted."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Quit")
@@ -107,7 +107,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 2.3")
+            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 2.6")
         }
 
         let menu = NSMenu()
@@ -126,12 +126,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(accessibilityItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "About MouseToucher 2.3", action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "About MouseToucher 2.6", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        let restartItem = NSMenuItem(title: "Restart MouseToucher 2.3", action: #selector(restart), keyEquivalent: "")
+        let restartItem = NSMenuItem(title: "Restart MouseToucher 2.6", action: #selector(restart), keyEquivalent: "")
         restartItem.target = self
         menu.addItem(restartItem)
-        menu.addItem(NSMenuItem(title: "Quit MouseToucher 2.3", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit MouseToucher 2.6", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem?.menu = menu
     }
@@ -155,7 +155,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "MouseToucher 2.3"
+        alert.messageText = "MouseToucher 2.6"
         alert.informativeText = """
         Intentional tap-to-click for Magic Mouse
 
@@ -168,7 +168,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         • Tune gesture recognition in Settings
         • Automatically use a preset for the current macOS version
 
-        Version 2.3
+        Version 2.6
 
         Uses private MultitouchSupport framework
         """
@@ -193,7 +193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if let error {
                     let alert = NSAlert(error: error)
-                    alert.messageText = "MouseToucher 2.3 Could Not Restart"
+                    alert.messageText = "MouseToucher 2.6 Could Not Restart"
                     alert.runModal()
                     return
                 }
@@ -312,7 +312,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if enabled, SMAppService.mainApp.status == .requiresApproval {
                 let alert = NSAlert()
                 alert.messageText = "ログイン時の自動起動を許可してください"
-                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 2.3 を許可してください。"
+                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 2.6 を許可してください。"
                 alert.addButton(withTitle: "ログイン項目を開く")
                 alert.addButton(withTitle: "後で")
                 if alert.runModal() == .alertFirstButtonReturn {
@@ -423,7 +423,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         activeDrag = (button: button, clickCount: clickCount, movesWindow: false)
         settingsWindowController?.setWindowDragStatus("通常のドラッグ入力")
         dragEventMonitor.begin(button: button, clickCount: clickCount)
-        downEvent.post(tap: .cghidEventTap)
+        downEvent.post(tap: dragEventMonitor.eventPostLocation)
     }
 
     @discardableResult
@@ -457,7 +457,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.activeDrag = nil
         dragEventMonitor.end()
-        upEvent?.post(tap: .cghidEventTap)
+        upEvent?.post(tap: dragEventMonitor.eventPostLocation)
     }
 
     private func nextClickCount(button: CompoundTapButton, location: CGPoint) -> Int64 {

@@ -352,8 +352,8 @@ private func testOSPresetsFollowCurrentSystemVersion() throws {
 private func testDragCompatibilitySelection() throws {
     try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 11), .macOS26)
     try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 26), .macOS26)
-    try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 27), .macOS27)
-    try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 28), .macOS27)
+    try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 27), .macOS26)
+    try expectEqual(DragCompatibilityMode.automatic.resolved(systemMajorVersion: 28), .macOS26)
     try expectEqual(DragCompatibilityMode.macOS26.resolved(systemMajorVersion: 27), .macOS26)
     try expectEqual(DragCompatibilityMode.macOS27.resolved(systemMajorVersion: 26), .macOS27)
 }
@@ -418,6 +418,8 @@ private func testCompatibilitySwitchEndsDragExactlyOnce() throws {
 private func testModernDragRunsBeforeWindowServerHandling() throws {
     try expectEqual(DragMotionEventMapper.tapLocation(for: .macOS27), .cghidEventTap)
     try expectEqual(DragMotionEventMapper.tapLocation(for: .macOS26), .cgSessionEventTap)
+    try expectEqual(DragMotionEventMapper.postLocation(for: .macOS27), .cgSessionEventTap)
+    try expectEqual(DragMotionEventMapper.postLocation(for: .macOS26), .cghidEventTap)
     for type: CGEventType in [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged] {
         try expectEqual(DragMotionEventMapper.accepts(type, mode: .macOS27), true)
         try expectEqual(DragMotionEventMapper.eventMask(for: .macOS27) & (1 << type.rawValue) != 0, true)
@@ -464,14 +466,37 @@ private func testDragEventsPreserveMotionAndPairButtons() throws {
             try expectEqual(move.getIntegerValueField(.mouseEventDeltaX), -8)
             try expectEqual(move.getIntegerValueField(.mouseEventDeltaY), 12)
             try expectEqual(move.getIntegerValueField(.mouseEventButtonNumber), button == .left ? 0 : 1)
+            try expectEqual(move.getDoubleValueField(.mouseEventPressure), 1.0)
             try expectEqual(down.type, button == .left ? .leftMouseDown : .rightMouseDown)
             try expectEqual(up.type, button == .left ? .leftMouseUp : .rightMouseUp)
+            try expectEqual(down.getDoubleValueField(.mouseEventPressure), 1.0)
+            try expectEqual(up.getDoubleValueField(.mouseEventPressure), 0.0)
             try expectEqual(down.getIntegerValueField(.eventSourceStateID), up.getIntegerValueField(.eventSourceStateID))
             if mode == .macOS27 {
                 try expectEqual(move.getIntegerValueField(.eventSourceStateID), down.getIntegerValueField(.eventSourceStateID))
             }
         }
     }
+}
+
+private func testModernDragCreatesFreshSessionEvents() throws {
+    let factory = DragMouseEventFactory(mode: .macOS27)
+    let point = CGPoint(x: 415, y: 290)
+    guard let motion = CGEvent(
+        mouseEventSource: nil, mouseType: .mouseMoved,
+        mouseCursorPosition: point, mouseButton: .left
+    ), let down = factory.buttonEvent(isDown: true, at: point, button: .left, clickCount: 1),
+       let dragged = factory.freshDragEvent(from: motion, button: .left, clickCount: 1),
+       let up = factory.buttonEvent(isDown: false, at: point, button: .left, clickCount: 1)
+    else { throw TestFailure(description: "Could not create fresh drag sequence") }
+
+    try expectEqual(motion.type, .mouseMoved)
+    try expectEqual(dragged.type, .leftMouseDragged)
+    try expectEqual(dragged.location, point)
+    try expectEqual(dragged.getDoubleValueField(.mouseEventPressure), 1.0)
+    try expectEqual(dragged.getIntegerValueField(.mouseEventClickState), 1)
+    try expectEqual(dragged.getIntegerValueField(.eventSourceStateID), down.getIntegerValueField(.eventSourceStateID))
+    try expectEqual(dragged.getIntegerValueField(.eventSourceStateID), up.getIntegerValueField(.eventSourceStateID))
 }
 
 private final class FakeWindowDragTarget: WindowDragTarget {
@@ -730,13 +755,14 @@ private enum CompoundTapTestRunner {
             ("disabled drag reports its reason", testDisabledThreeFingerDragReportsReason),
             ("configuration change ends drag", testConfigurationChangeEndsActiveDrag),
             ("OS presets follow the current version", testOSPresetsFollowCurrentSystemVersion),
-            ("compatibility follows OS or explicit override", testDragCompatibilitySelection),
+            ("legacy default and explicit compatibility", testDragCompatibilitySelection),
             ("old presets migrate without losing tuning", testOldPresetsMigrateWithoutLosingTuning),
             ("legacy mode persists and applies on macOS 27", testExplicitLegacyModePersistsAndAppliesOn27),
             ("compatibility switch ends drag exactly once", testCompatibilitySwitchEndsDragExactlyOnce),
             ("modern drag precedes WindowServer handling", testModernDragRunsBeforeWindowServerHandling),
             ("modern drag permits hardware input", testModernDragKeepsHardwareInputEnabled),
             ("drag events preserve motion and pair buttons", testDragEventsPreserveMotionAndPairButtons),
+            ("modern drag creates fresh session events", testModernDragCreatesFreshSessionEvents),
             ("window dragging excludes controls and document content", testWindowDragRejectsControlsAndContent),
             ("unified title bars support negative screen coordinates", testUnifiedTitleBarAndNegativeCoordinates),
             ("window position follows cursor and stops on release", testWindowDragFollowsCursorWithoutAccumulatedDrift),

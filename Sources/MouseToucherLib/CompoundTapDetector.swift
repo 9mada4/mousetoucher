@@ -12,12 +12,14 @@ enum DragCompatibilityMode: String, Codable, CaseIterable {
     case macOS27
 
     func resolved(systemMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> Self {
-        self == .automatic ? (systemMajorVersion >= 27 ? .macOS27 : .macOS26) : self
+        // Keep the proven session-level path as the default while the macOS 27
+        // transport is tested. The modern path remains explicitly selectable.
+        self == .automatic ? .macOS26 : self
     }
 
     var displayName: String {
         switch self {
-        case .automatic: return "自動（現在のmacOSに合わせる）"
+        case .automatic: return "自動（従来方式を使用）"
         case .macOS26: return "macOS 26以前（従来方式）"
         case .macOS27: return "macOS 27以降"
         }

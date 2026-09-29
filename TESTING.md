@@ -30,9 +30,10 @@ The suite currently checks:
 - compatibility defaults to the appropriate OS path and explicit macOS 26/27 overrides are respected
 - old presets migrate without losing tuning, and a saved legacy selection remains available on macOS 27
 - changing compatibility ends an active drag exactly once
-- the macOS 27 transport uses the HID tap before WindowServer; macOS 26 retains the session tap
+- the macOS 27 transport observes motion at the HID tap and posts fresh dragged events at the session tap; macOS 26 retains its session-tap conversion
 - the modern drag source allows hardware mouse and keyboard events during synthetic dragging
 - drag conversion preserves coordinates (including negative display coordinates), motion deltas, timestamp, modifiers, and button/source pairing
+- fresh macOS 27 dragged events leave the original motion unchanged and share a source with down/up
 - title-bar detection excludes interactive controls and document content
 - direct window movement uses absolute pointer displacement, stops after release or a failed position write, and never retargets a different window mid-gesture
 - consecutive click counts increment for double- and multi-clicks
@@ -52,9 +53,9 @@ Build the complete universal macOS application:
 ./build.sh
 ```
 
-The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 2.3.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
+The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 2.6.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
 
-For macOS 27 Command Line Tools without Intel Swift compatibility libraries, build the local Apple Silicon app with `ARCHS=arm64 ./build.sh`. Verify the actual output with `lipo -info "build/MouseToucher 2.3.app/Contents/MacOS/MouseToucher 2.3"`. The included build uses arm64; universal compilation must be checked with a toolchain providing the Intel runtime libraries.
+For macOS 27 Command Line Tools without Intel Swift compatibility libraries, build the local Apple Silicon app with `ARCHS=arm64 ./build.sh`. Verify the actual output with `lipo -info "build/MouseToucher 2.6.app/Contents/MacOS/MouseToucher 2.6"`. The included build uses arm64; universal compilation must be checked with a toolchain providing the Intel runtime libraries.
 
 ## Manual Magic Mouse checklist
 
@@ -64,8 +65,11 @@ For macOS 27 Command Line Tools without Intel Swift compatibility libraries, bui
 - The Settings window opens and changes are saved without rebuilding.
 - The displayed current macOS version matches `sw_vers`, and its exact preset is marked as current.
 - Adding an arbitrary past or future OS preset, marking it as default, and applying it to the current OS all work.
-- In the current preset, switch **ドラッグ互換性** between automatic, macOS 26, and macOS 27. Confirm **ドラッグ入力** changes immediately, then restart and check the choice persists. Editing another preset must not change the active mode until it is applied.
-- On macOS 27, use automatic or macOS 27 compatibility. Place the pointer on a Finder or another app's draggable title-bar area, place three fingers on the Magic Mouse, and move the physical mouse. The **window itself** must follow continuously and stop when all fingers lift. Repeat across displays and after partial finger release. File dragging alone does not validate this regression.
+- In the current preset, switch **ドラッグ互換性** between automatic, macOS 26, and macOS 27. Automatic must report the legacy transport on macOS 27; the explicit macOS 27 choice must report the modern transport. Confirm **ドラッグ入力** changes immediately, then restart and check the choice persists. Editing another preset must not change the active mode until it is applied.
+- On macOS 27, compare automatic (legacy) and explicit macOS 27 compatibility. Place the pointer on a Finder or another app's draggable title-bar area, place three fingers on the Magic Mouse, and move the physical mouse. Note whether the **window itself** follows continuously and stops when all fingers lift. Repeat across displays and after partial finger release. File dragging alone does not validate this regression.
+- In each mode, enter Mission Control, place the pointer over an app window preview, begin a three-finger drag, and move it to another Space in the top row. Note whether the preview follows the pointer and moves to the destination Space when all fingers lift. Repeat with a physical mouse press as a control.
+
+Before the fresh-event change, macOS 27.0 testing found that a physical mouse press moved a Mission Control preview, while three-finger drag did not in either compatibility mode. A normal window moved in explicit macOS 27 mode through the direct title-bar path, but not in legacy mode. The previous synthetic down, dragged, and up sequence was visible to an event tap, yet did not move the Mission Control preview. Recheck the new session-posting path in this build; automated event-shape tests cannot establish whether Mission Control accepts it.
 - In both modes, check ordinary file dragging, text selection, two-finger clicks, and pinch zoom. Repeat the original behavior checks on a macOS 26 machine when available.
 - Switch compatibility or disable the app during a drag; the held button must release. If input monitoring cannot start, Settings must report it and no synthetic button-down should be sent.
 - The live status updates touch count, gesture state, recognized operation, and cancellation reason.

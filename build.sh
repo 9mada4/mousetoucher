@@ -12,7 +12,7 @@ for architecture in "${ARCHITECTURES[@]}"; do
     esac
 done
 
-APP_NAME="MouseToucher 2.3"
+APP_NAME="MouseToucher 2.6"
 BUILD_DIR="build"
 APP_PATH="$BUILD_DIR/$APP_NAME.app"
 ICON_SOURCE="Assets/AppIcon.png"
