@@ -20,10 +20,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     )
     private var activeDrag: (button: CompoundTapButton, clickCount: Int64, movesWindow: Bool)?
     private var isMagnifying = false
+    private var isSleeping = false
+    private var deviceRefreshTimer: Timer?
+    private var wakeRecoveryTask: DispatchWorkItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupSettings()
         setupMenuBar()
+        let workspaceNotifications = NSWorkspace.shared.notificationCenter
+        workspaceNotifications.addObserver(
+            self, selector: #selector(handleWillSleep),
+            name: NSWorkspace.willSleepNotification, object: nil
+        )
+        workspaceNotifications.addObserver(
+            self, selector: #selector(handleDidWake),
+            name: NSWorkspace.didWakeNotification, object: nil
+        )
 
         if !AXIsProcessTrusted() { showSettings() }
         ensureAccessibilityAndStart()
@@ -39,7 +51,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasShownAccessibilityInstructions = true
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "MouseToucher 2.2 needs accessibility permissions to simulate clicks and native pinch gestures.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 2.2. The app will begin working as soon as permission is granted."
+        alert.informativeText = "MouseToucher 2.3 needs accessibility permissions to simulate clicks and native pinch gestures.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 2.3. The app will begin working as soon as permission is granted."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Quit")
@@ -54,17 +66,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        wakeRecoveryTask?.cancel()
+        deviceRefreshTimer?.invalidate()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
         multitouchManager?.stop()
         endActiveDrag(at: CGEvent(source: nil)?.location ?? CGPoint.zero)
         endActiveMagnification(at: CGEvent(source: nil)?.location ?? CGPoint.zero)
         dragEventMonitor.stop()
     }
 
+    @objc private func handleWillSleep(_ notification: Notification) {
+        isSleeping = true
+        wakeRecoveryTask?.cancel()
+        let location = CGEvent(source: nil)?.location ?? .zero
+        endActiveDrag(at: location)
+        endActiveMagnification(at: location)
+        clickSequenceTracker.reset()
+        multitouchManager?.stop()
+        dragEventMonitor.stop()
+    }
+
+    @objc private func handleDidWake(_ notification: Notification) {
+        isSleeping = false
+        wakeRecoveryTask?.cancel()
+        guard hasStartedMultitouch else { return }
+
+        // Bluetooth devices may not be ready when the wake notification fires.
+        // The periodic check below also discovers devices connected later.
+        let task = DispatchWorkItem { [weak self] in
+            guard let self, !self.isSleeping else { return }
+            self.wakeRecoveryTask = nil
+            self.multitouchManager?.refreshDevices(force: true)
+            _ = self.startDragEventMonitor(configuration: self.settings?.activeConfiguration ?? .default)
+        }
+        wakeRecoveryTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: task)
+    }
+
     func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 2.2")
+            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 2.3")
         }
 
         let menu = NSMenu()
@@ -83,12 +126,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(accessibilityItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "About MouseToucher 2.2", action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "About MouseToucher 2.3", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        let restartItem = NSMenuItem(title: "Restart MouseToucher 2.2", action: #selector(restart), keyEquivalent: "")
+        let restartItem = NSMenuItem(title: "Restart MouseToucher 2.3", action: #selector(restart), keyEquivalent: "")
         restartItem.target = self
         menu.addItem(restartItem)
-        menu.addItem(NSMenuItem(title: "Quit MouseToucher 2.2", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit MouseToucher 2.3", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem?.menu = menu
     }
@@ -112,7 +155,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "MouseToucher 2.2"
+        alert.messageText = "MouseToucher 2.3"
         alert.informativeText = """
         Intentional tap-to-click for Magic Mouse
 
@@ -125,7 +168,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         • Tune gesture recognition in Settings
         • Automatically use a preset for the current macOS version
 
-        Version 2.2
+        Version 2.3
 
         Uses private MultitouchSupport framework
         """
@@ -150,7 +193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if let error {
                     let alert = NSAlert(error: error)
-                    alert.messageText = "MouseToucher 2.2 Could Not Restart"
+                    alert.messageText = "MouseToucher 2.3 Could Not Restart"
                     alert.runModal()
                     return
                 }
@@ -203,6 +246,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         multitouchManager?.start()
+
+        let timer = Timer(timeInterval: 5.0, repeats: true) { [weak self] _ in
+            guard let self, !self.isSleeping, self.wakeRecoveryTask == nil else { return }
+            self.multitouchManager?.refreshDevices()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        deviceRefreshTimer = timer
     }
 
     private func setupSettings() {
@@ -262,7 +312,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if enabled, SMAppService.mainApp.status == .requiresApproval {
                 let alert = NSAlert()
                 alert.messageText = "ログイン時の自動起動を許可してください"
-                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 2.2 を許可してください。"
+                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 2.3 を許可してください。"
                 alert.addButton(withTitle: "ログイン項目を開く")
                 alert.addButton(withTitle: "後で")
                 if alert.runModal() == .alertFirstButtonReturn {

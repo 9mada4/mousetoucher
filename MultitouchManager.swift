@@ -23,6 +23,8 @@ struct GestureStatusSnapshot: Equatable {
 // Swift wrapper for Multitouch framework
 class MultitouchManager {
     private var devices: [MTDeviceRef] = []
+    // Retain the framework's array while using its device references.
+    private var deviceList: NSArray?
     private let stateLock = NSLock()
     private var compoundTapDetector: CompoundTapDetector
     private var isEnabled = true
@@ -40,24 +42,38 @@ class MultitouchManager {
     }
 
     func start() {
+        refreshDevices(force: true)
+    }
+
+    /// Re-enumerate after wake or a Bluetooth reconnect. An unchanged device
+    /// list keeps its existing callbacks during the periodic check.
+    func refreshDevices(force: Bool = false) {
         guard let deviceList = MTDeviceCreateList() else {
+            if !devices.isEmpty { stop() }
             return
         }
 
         let deviceArray = deviceList.takeRetainedValue() as NSArray
         let count = CFArrayGetCount(deviceArray)
+        var availableDevices: [MTDeviceRef] = []
 
         for i in 0..<count {
             let device = unsafeBitCast(CFArrayGetValueAtIndex(deviceArray, i), to: MTDeviceRef.self)
 
             // Only monitor external devices (Magic Mouse), skip built-in trackpads
-            let isBuiltIn = MTDeviceIsBuiltIn(device)
+            if !MTDeviceIsBuiltIn(device) { availableDevices.append(device) }
+        }
 
-            if !isBuiltIn {
-                devices.append(device)
-                MTRegisterContactFrameCallback(device, touchCallback)
-                MTDeviceStart(device, 0)
-            }
+        let currentIDs = Set(devices.map { UInt(bitPattern: $0) })
+        let availableIDs = Set(availableDevices.map { UInt(bitPattern: $0) })
+        guard force || currentIDs != availableIDs else { return }
+
+        stop()
+        self.deviceList = deviceArray
+        devices = availableDevices
+        for device in devices {
+            MTRegisterContactFrameCallback(device, touchCallback)
+            MTDeviceStart(device, 0)
         }
     }
 
@@ -68,6 +84,7 @@ class MultitouchManager {
             MTDeviceStop(device)
         }
         devices.removeAll()
+        deviceList = nil
     }
 
     func setEnabled(_ enabled: Bool) {

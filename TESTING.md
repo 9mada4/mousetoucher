@@ -52,9 +52,9 @@ Build the complete universal macOS application:
 ./build.sh
 ```
 
-The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 2.2.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
+The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 2.3.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
 
-For macOS 27 Command Line Tools without Intel Swift compatibility libraries, build the local Apple Silicon app with `ARCHS=arm64 ./build.sh`. Verify the actual output with `lipo -info "build/MouseToucher 2.2.app/Contents/MacOS/MouseToucher 2.2"`. The included build uses arm64; universal compilation must be checked with a toolchain providing the Intel runtime libraries.
+For macOS 27 Command Line Tools without Intel Swift compatibility libraries, build the local Apple Silicon app with `ARCHS=arm64 ./build.sh`. Verify the actual output with `lipo -info "build/MouseToucher 2.3.app/Contents/MacOS/MouseToucher 2.3"`. The included build uses arm64; universal compilation must be checked with a toolchain providing the Intel runtime libraries.
 
 ## Manual Magic Mouse checklist
 
@@ -69,6 +69,9 @@ For macOS 27 Command Line Tools without Intel Swift compatibility libraries, bui
 - In both modes, check ordinary file dragging, text selection, two-finger clicks, and pinch zoom. Repeat the original behavior checks on a macOS 26 machine when available.
 - Switch compatibility or disable the app during a drag; the held button must release. If input monitoring cannot start, Settings must report it and no synthetic button-down should be sent.
 - The live status updates touch count, gesture state, recognized operation, and cancellation reason.
+- With the app running, put the Mac to sleep and wake it. After the Magic Mouse reconnects, verify touch count updates and taps, dragging, and pinch zoom work without restarting the app.
+- Turn the Magic Mouse off and back on while the app stays open. Within a few seconds of reconnection, verify touch count and gestures work again. Repeat with the mouse disconnected when the app starts.
+- Start a three-finger drag, then put the Mac to sleep. After wake, verify the old drag is released and the next gesture starts cleanly.
 - In Safari or Preview, spreading two fingers zooms in smoothly and bringing them together zooms out smoothly.
 - Pinching does not leak an ordinary scroll event into the target application.
 - Releasing either pinch finger sends an ended phase and leaves the next tap responsive.
