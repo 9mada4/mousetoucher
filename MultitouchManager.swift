@@ -20,12 +20,48 @@ struct GestureStatusSnapshot: Equatable {
     let cancellationReason: CompoundGestureCancellationReason?
 }
 
+struct MultitouchDeviceSnapshot {
+    let devices: [MTDeviceRef]
+    let retainedList: NSArray?
+}
+
+/// The framework boundary can be replaced in tests without opening devices.
+struct MultitouchDeviceAccess {
+    var snapshot: () -> MultitouchDeviceSnapshot?
+    var start: (MTDeviceRef) -> Void
+    var stop: (MTDeviceRef) -> Void
+
+    static let system = MultitouchDeviceAccess(
+        snapshot: {
+            guard let list = MTDeviceCreateList() else { return nil }
+            let array = list.takeRetainedValue() as NSArray
+            var devices: [MTDeviceRef] = []
+            for index in 0..<CFArrayGetCount(array) {
+                let device = unsafeBitCast(CFArrayGetValueAtIndex(array, index), to: MTDeviceRef.self)
+                if !MTDeviceIsBuiltIn(device) { devices.append(device) }
+            }
+            return MultitouchDeviceSnapshot(devices: devices, retainedList: array)
+        },
+        start: {
+            MTRegisterContactFrameCallback($0, touchCallback)
+            MTDeviceStart($0, 0)
+        },
+        stop: {
+            MTUnregisterContactFrameCallback($0, touchCallback)
+            MTDeviceStop($0)
+        }
+    )
+}
+
 // Swift wrapper for Multitouch framework
 class MultitouchManager {
     private var devices: [MTDeviceRef] = []
     // Retain the framework's array while using its device references.
     private var deviceList: NSArray?
     private let stateLock = NSLock()
+    private let deviceAccess: MultitouchDeviceAccess
+    private let physicalButtonIsPressed: () -> Bool
+    private var isRefreshingDevices = false
     private var compoundTapDetector: CompoundTapDetector
     private var isEnabled = true
     private var lastRecognizedGesture: RecognizedGesture = .none
@@ -36,8 +72,17 @@ class MultitouchManager {
     var onGestureRecognized: ((CGPoint, CompoundGestureEvent) -> Void)?
     var onStatusChanged: ((GestureStatusSnapshot) -> Void)?
 
-    init(configuration: CompoundGestureConfiguration = .default) {
+    init(
+        configuration: CompoundGestureConfiguration = .default,
+        deviceAccess: MultitouchDeviceAccess = .system,
+        physicalButtonIsPressed: @escaping () -> Bool = {
+            CGEventSource.buttonState(.hidSystemState, button: .left) ||
+            CGEventSource.buttonState(.hidSystemState, button: .right)
+        }
+    ) {
         compoundTapDetector = CompoundTapDetector(configuration: configuration)
+        self.deviceAccess = deviceAccess
+        self.physicalButtonIsPressed = physicalButtonIsPressed
         MultitouchManager.sharedInstance = self
     }
 
@@ -45,44 +90,52 @@ class MultitouchManager {
         refreshDevices(force: true)
     }
 
-    /// Re-enumerate after wake or a Bluetooth reconnect. An unchanged device
-    /// list keeps its existing callbacks during the periodic check.
+    /// Periodic reconnect checks wait until a latched drag has ended. Forced
+    /// refresh is reserved for startup and wake, after explicit cancellation.
     func refreshDevices(force: Bool = false) {
-        guard let deviceList = MTDeviceCreateList() else {
+        stateLock.lock()
+        let dragIsActive = compoundTapDetector.activeDragButton != nil
+        stateLock.unlock()
+        guard force || !dragIsActive else { return }
+
+        guard let snapshot = deviceAccess.snapshot() else {
+            guard beginDeviceRefresh(force: force) else { return }
+            defer { finishDeviceRefresh() }
             if !devices.isEmpty { stop() }
             return
         }
 
-        let deviceArray = deviceList.takeRetainedValue() as NSArray
-        let count = CFArrayGetCount(deviceArray)
-        var availableDevices: [MTDeviceRef] = []
-
-        for i in 0..<count {
-            let device = unsafeBitCast(CFArrayGetValueAtIndex(deviceArray, i), to: MTDeviceRef.self)
-
-            // Only monitor external devices (Magic Mouse), skip built-in trackpads
-            if !MTDeviceIsBuiltIn(device) { availableDevices.append(device) }
-        }
-
         let currentIDs = Set(devices.map { UInt(bitPattern: $0) })
-        let availableIDs = Set(availableDevices.map { UInt(bitPattern: $0) })
+        let availableIDs = Set(snapshot.devices.map { UInt(bitPattern: $0) })
         guard force || currentIDs != availableIDs else { return }
+        // A callback may have begun a drag while enumeration was in progress.
+        guard beginDeviceRefresh(force: force) else { return }
+        defer { finishDeviceRefresh() }
 
         stop()
-        self.deviceList = deviceArray
-        devices = availableDevices
-        for device in devices {
-            MTRegisterContactFrameCallback(device, touchCallback)
-            MTDeviceStart(device, 0)
-        }
+        deviceList = snapshot.retainedList
+        devices = snapshot.devices
+        for device in devices { deviceAccess.start(device) }
+    }
+
+    private func beginDeviceRefresh(force: Bool) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !isRefreshingDevices,
+              force || compoundTapDetector.activeDragButton == nil else { return false }
+        isRefreshingDevices = true
+        return true
+    }
+
+    private func finishDeviceRefresh() {
+        stateLock.lock()
+        isRefreshingDevices = false
+        stateLock.unlock()
     }
 
     func stop() {
         cancelGesture(reason: .disabled, touchCount: 0)
-        for device in devices {
-            MTUnregisterContactFrameCallback(device, touchCallback)
-            MTDeviceStop(device)
-        }
+        for device in devices { deviceAccess.stop(device) }
         devices.removeAll()
         deviceList = nil
     }
@@ -126,6 +179,10 @@ class MultitouchManager {
 
     func processTouches(_ touches: [CompoundTouch], timestamp: Double) {
         stateLock.lock()
+        guard !isRefreshingDevices else {
+            stateLock.unlock()
+            return
+        }
         let enabled = isEnabled
         let dragIsActive = compoundTapDetector.activeDragButton != nil
         stateLock.unlock()
@@ -135,16 +192,18 @@ class MultitouchManager {
             return
         }
 
-        let physicalButtonIsPressed =
-            CGEventSource.buttonState(.hidSystemState, button: .left) ||
-            CGEventSource.buttonState(.hidSystemState, button: .right)
-
-        if physicalButtonIsPressed && !dragIsActive {
+        if physicalButtonIsPressed() && !dragIsActive {
             cancelGesture(reason: .physicalButtonPressed, touchCount: touches.count)
             return
         }
 
         stateLock.lock()
+        // Keep callback processing and the refresh gate atomic. Framework
+        // stop/start calls stay outside the lock because they can invoke callbacks.
+        guard !isRefreshingDevices else {
+            stateLock.unlock()
+            return
+        }
         let event = compoundTapDetector.process(touches: touches, timestamp: timestamp)
         if let event {
             lastRecognizedGesture = recognizedGesture(for: event)

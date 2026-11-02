@@ -2,19 +2,16 @@ import CoreGraphics
 import Foundation
 
 enum DragMotionEventMapper {
-    static func tapLocation(for mode: DragCompatibilityMode) -> CGEventTapLocation {
-        mode.resolved() == .macOS27 ? .cghidEventTap : .cgSessionEventTap
-    }
+    static let tapLocation: CGEventTapLocation = .cghidEventTap
 
-    static func accepts(_ type: CGEventType, mode: DragCompatibilityMode) -> Bool {
+    static func accepts(_ type: CGEventType) -> Bool {
         if type == .mouseMoved { return true }
-        return mode.resolved() == .macOS27 &&
-            (type == .leftMouseDragged || type == .rightMouseDragged || type == .otherMouseDragged)
+        return type == .leftMouseDragged || type == .rightMouseDragged || type == .otherMouseDragged
     }
 
-    static func eventMask(for mode: DragCompatibilityMode) -> CGEventMask {
+    static var eventMask: CGEventMask {
         let motionTypes: [CGEventType] = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]
-        return motionTypes.filter { accepts($0, mode: mode) }.reduce(
+        return motionTypes.reduce(
             CGEventMask(1) << CGEventType.scrollWheel.rawValue
         ) { $0 | (CGEventMask(1) << $1.rawValue) }
     }
@@ -27,9 +24,7 @@ enum DragMotionEventMapper {
         Int64(button == .right ? CGMouseButton.right.rawValue : CGMouseButton.left.rawValue)
     }
 
-    static func postLocation(for mode: DragCompatibilityMode) -> CGEventTapLocation {
-        mode.resolved() == .macOS27 ? .cgSessionEventTap : .cghidEventTap
-    }
+    static let postLocation: CGEventTapLocation = .cgSessionEventTap
 }
 
 /// A single source pairs the down/move/up events of a modern drag. Explicitly
@@ -37,11 +32,8 @@ enum DragMotionEventMapper {
 /// the very mouse movement that must be converted into dragged events.
 final class DragMouseEventFactory {
     let source: CGEventSource?
-    let mode: DragCompatibilityMode
-
-    init(mode: DragCompatibilityMode) {
-        self.mode = mode.resolved()
-        source = self.mode == .macOS27 ? CGEventSource(stateID: .privateState) : nil
+    init() {
+        source = CGEventSource(stateID: .privateState)
         if let source {
             source.localEventsSuppressionInterval = 0
             let allowedEvents: CGEventFilterMask = [
@@ -52,7 +44,7 @@ final class DragMouseEventFactory {
         }
     }
 
-    var isAvailable: Bool { mode == .macOS26 || source != nil }
+    var isAvailable: Bool { source != nil }
 
     func buttonEvent(isDown: Bool, at location: CGPoint, button: CompoundTapButton, clickCount: Int64) -> CGEvent? {
         let type: CGEventType = button == .right
@@ -65,22 +57,8 @@ final class DragMouseEventFactory {
             mouseButton: button == .right ? .right : .left
         ) else { return nil }
         event.setIntegerValueField(.mouseEventClickState, value: clickCount)
-        if mode == .macOS27 {
-            event.flags = CGEventSource.flagsState(.combinedSessionState)
-        }
+        event.flags = CGEventSource.flagsState(.combinedSessionState)
         return event
-    }
-
-    func convertMotion(_ event: CGEvent, button: CompoundTapButton, clickCount: Int64) {
-        if let source {
-            event.setSource(source)
-        }
-        event.type = DragMotionEventMapper.eventType(for: button)
-        // Changing only the event type leaves mouseMoved's up-state pressure (0)
-        // on a dragged event. System drag handlers expect a held button here.
-        event.setDoubleValueField(.mouseEventPressure, value: 1.0)
-        event.setIntegerValueField(.mouseEventButtonNumber, value: DragMotionEventMapper.buttonNumber(for: button))
-        event.setIntegerValueField(.mouseEventClickState, value: clickCount)
     }
 
     /// Hammerspoon creates a new mouse event for each drag position and posts
@@ -110,28 +88,20 @@ final class DragEventMonitor {
     private let stateLock = NSLock()
     private var activeDrag: ActiveDrag?
     private var suppressesScroll = false
-    private var isWindowDragging = false
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private(set) var compatibilityMode: DragCompatibilityMode = .macOS26
-    private var eventFactory = DragMouseEventFactory(mode: .macOS26)
+    private let eventFactory = DragMouseEventFactory()
 
     @discardableResult
-    func start(mode: DragCompatibilityMode = .automatic) -> Bool {
-        let resolvedMode = mode.resolved()
-        if resolvedMode != compatibilityMode {
-            stop()
-            compatibilityMode = resolvedMode
-            eventFactory = DragMouseEventFactory(mode: resolvedMode)
-        }
+    func start() -> Bool {
         guard eventTap == nil else { return true }
         guard eventFactory.isAvailable else { return false }
 
         guard let eventTap = CGEvent.tapCreate(
-            tap: DragMotionEventMapper.tapLocation(for: resolvedMode),
+            tap: DragMotionEventMapper.tapLocation,
             place: .headInsertEventTap,
             options: .defaultTap,
-            eventsOfInterest: DragMotionEventMapper.eventMask(for: resolvedMode),
+            eventsOfInterest: DragMotionEventMapper.eventMask,
             callback: dragEventTapCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
@@ -165,19 +135,12 @@ final class DragEventMonitor {
     }
 
     var eventPostLocation: CGEventTapLocation {
-        DragMotionEventMapper.postLocation(for: compatibilityMode)
+        DragMotionEventMapper.postLocation
     }
 
     func end() {
         stateLock.lock()
         activeDrag = nil
-        isWindowDragging = false
-        stateLock.unlock()
-    }
-
-    func beginWindowDrag() {
-        stateLock.lock()
-        isWindowDragging = true
         stateLock.unlock()
     }
 
@@ -222,15 +185,14 @@ final class DragEventMonitor {
         stateLock.lock()
         let drag = activeDrag
         let shouldSuppressScroll = suppressesScroll
-        let windowDrag = isWindowDragging
         stateLock.unlock()
 
         if type == .scrollWheel,
-           shouldSuppressScroll || windowDrag || (drag != nil && compatibilityMode == .macOS27) {
+           shouldSuppressScroll || drag != nil {
             return nil
         }
 
-        guard DragMotionEventMapper.accepts(type, mode: compatibilityMode) else {
+        guard DragMotionEventMapper.accepts(type) else {
             return Unmanaged.passUnretained(event)
         }
 
@@ -238,16 +200,11 @@ final class DragEventMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-        if compatibilityMode == .macOS27 {
-            guard let freshEvent = eventFactory.freshDragEvent(
-                from: event, button: drag.button, clickCount: drag.clickCount
-            ) else { return Unmanaged.passUnretained(event) }
-            freshEvent.post(tap: .cgSessionEventTap)
-            return nil
-        }
-
-        eventFactory.convertMotion(event, button: drag.button, clickCount: drag.clickCount)
-        return Unmanaged.passUnretained(event)
+        guard let freshEvent = eventFactory.freshDragEvent(
+            from: event, button: drag.button, clickCount: drag.clickCount
+        ) else { return Unmanaged.passUnretained(event) }
+        freshEvent.post(tap: DragMotionEventMapper.postLocation)
+        return nil
     }
 
     deinit {

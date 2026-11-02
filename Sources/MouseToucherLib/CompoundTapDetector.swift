@@ -6,22 +6,21 @@ enum CompoundTapButton: Equatable {
     case right
 }
 
-enum DragCompatibilityMode: String, Codable, CaseIterable {
-    case automatic
-    case macOS26
-    case macOS27
+enum DragReleaseMode: String, Codable, CaseIterable {
+    case holdThreeFingers
+    case singleFingerTap
+    case singleFingerTapOrCompoundTap
 
-    func resolved(systemMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion) -> Self {
-        // Keep the proven session-level path as the default while the macOS 27
-        // transport is tested. The modern path remains explicitly selectable.
-        self == .automatic ? .macOS26 : self
-    }
-
-    var displayName: String {
-        switch self {
-        case .automatic: return "自動（従来方式を使用）"
-        case .macOS26: return "macOS 26以前（従来方式）"
-        case .macOS27: return "macOS 27以降"
+    init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        if value == "singleFingerTapOrPhysicalClick" {
+            self = .singleFingerTapOrCompoundTap
+        } else if let mode = DragReleaseMode(rawValue: value) {
+            self = mode
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: try decoder.singleValueContainer(), debugDescription: "Unknown drag release mode"
+            )
         }
     }
 }
@@ -38,6 +37,7 @@ struct CompoundGestureConfiguration: Equatable {
         movementThreshold: defaultMovementThreshold,
         rightClickSplit: defaultRightClickSplit,
         isThreeFingerDragEnabled: true,
+        dragReleaseMode: .holdThreeFingers,
         isPinchZoomEnabled: true,
         pinchStartThreshold: defaultPinchStartThreshold,
         pinchSensitivity: defaultPinchSensitivity
@@ -47,10 +47,10 @@ struct CompoundGestureConfiguration: Equatable {
     var movementThreshold: CGFloat
     var rightClickSplit: CGFloat
     var isThreeFingerDragEnabled: Bool
+    var dragReleaseMode: DragReleaseMode
     var isPinchZoomEnabled: Bool
     var pinchStartThreshold: CGFloat
     var pinchSensitivity: CGFloat
-    var dragCompatibility: DragCompatibilityMode = .automatic
 
     var normalized: CompoundGestureConfiguration {
         CompoundGestureConfiguration(
@@ -58,10 +58,10 @@ struct CompoundGestureConfiguration: Equatable {
             movementThreshold: min(max(movementThreshold, 0.01), 0.12),
             rightClickSplit: min(max(rightClickSplit, 0.35), 0.75),
             isThreeFingerDragEnabled: isThreeFingerDragEnabled,
+            dragReleaseMode: dragReleaseMode,
             isPinchZoomEnabled: isPinchZoomEnabled,
             pinchStartThreshold: min(max(pinchStartThreshold, 0.01), 0.08),
-            pinchSensitivity: min(max(pinchSensitivity, 0.25), 3.0),
-            dragCompatibility: dragCompatibility
+            pinchSensitivity: min(max(pinchSensitivity, 0.25), 3.0)
         )
     }
 }
@@ -124,7 +124,7 @@ struct CompoundMagnification: Equatable {
 /// remains active after a successful gesture so it can be reused for
 /// consecutive clicks. Moving two fingers apart or together emits incremental
 /// magnification values. Three simultaneous touches begin a left-button drag
-/// immediately; the drag ends only after every finger lifts.
+/// immediately. The selected release mode controls when the drag ends.
 final class CompoundTapDetector {
     private(set) var configuration: CompoundGestureConfiguration
 
@@ -144,6 +144,10 @@ final class CompoundTapDetector {
     private var canBeginTap = true
     private var requiresAllFingersReleased = false
     private(set) var activeDragButton: CompoundTapButton?
+    private var dragDropTap: TrackedTouch?
+    private var dragDropSecondTouch: TrackedTouch?
+    private var dragDropSingleTapEligible = false
+    private var canBeginDragDropTap = false
     private(set) var lastCancellationReason: CompoundGestureCancellationReason?
 
     var gestureState: CompoundGestureState {
@@ -174,6 +178,7 @@ final class CompoundTapDetector {
         movementThreshold: CGFloat = 0.04,
         rightClickSplit: CGFloat = 0.5,
         isThreeFingerDragEnabled: Bool = true,
+        dragReleaseMode: DragReleaseMode = .holdThreeFingers,
         isPinchZoomEnabled: Bool = true,
         pinchStartThreshold: CGFloat = 0.025,
         pinchSensitivity: CGFloat = 1.0
@@ -183,6 +188,7 @@ final class CompoundTapDetector {
             movementThreshold: movementThreshold,
             rightClickSplit: rightClickSplit,
             isThreeFingerDragEnabled: isThreeFingerDragEnabled,
+            dragReleaseMode: dragReleaseMode,
             isPinchZoomEnabled: isPinchZoomEnabled,
             pinchStartThreshold: pinchStartThreshold,
             pinchSensitivity: pinchSensitivity
@@ -194,6 +200,21 @@ final class CompoundTapDetector {
     }
 
     func process(touches: [CompoundTouch], timestamp: TimeInterval) -> CompoundGestureEvent? {
+        if let activeDragButton {
+            if configuration.dragReleaseMode == .holdThreeFingers {
+                if touches.isEmpty {
+                    resetTracking()
+                    lastCancellationReason = nil
+                    return .dragEnded(activeDragButton)
+                }
+                return nil
+            }
+            if configuration.dragReleaseMode == .singleFingerTapOrCompoundTap {
+                return processCombinedDragDropTap(touches: touches, timestamp: timestamp, button: activeDragButton)
+            }
+            return processDragDropTap(touches: touches, timestamp: timestamp, button: activeDragButton)
+        }
+
         if touches.isEmpty {
             let endingEvent = endingContinuousGestureEvent()
             resetTracking()
@@ -201,12 +222,6 @@ final class CompoundTapDetector {
                 lastCancellationReason = nil
             }
             return endingEvent
-        }
-
-        // Once a three-finger drag starts, tolerate finger movement and partial
-        // contact loss. Releasing every finger is the explicit drop gesture.
-        if activeDragButton != nil {
-            return nil
         }
 
         if touches.count >= 3 {
@@ -235,6 +250,10 @@ final class CompoundTapDetector {
             canBeginTap = false
             requiresAllFingersReleased = false
             activeDragButton = .left
+            dragDropTap = nil
+            dragDropSecondTouch = nil
+            dragDropSingleTapEligible = false
+            canBeginDragDropTap = false
             lastCancellationReason = nil
             return .dragBegan(CompoundTap(button: .left, surfaceLocation: surfaceLocation))
         }
@@ -411,6 +430,150 @@ final class CompoundTapDetector {
         lastCancellationReason = nil
     }
 
+    private func processDragDropTap(
+        touches: [CompoundTouch], timestamp: TimeInterval, button: CompoundTapButton
+    ) -> CompoundGestureEvent? {
+        if touches.isEmpty {
+            if let tap = dragDropTap {
+                let duration = timestamp - tap.startTime
+                if duration >= 0 && duration <= tapTimeThreshold {
+                    resetTracking()
+                    lastCancellationReason = nil
+                    return .dragEnded(button)
+                }
+            }
+            dragDropTap = nil
+            canBeginDragDropTap = true
+            return nil
+        }
+
+        // A three/two-to-one transition is partial release, not a new tap.
+        // Multi-finger contact and replacement IDs invalidate a drop candidate
+        // until an empty frame separates it from the next single-finger touch.
+        guard touches.count == 1, let touch = touches.first else {
+            dragDropTap = nil
+            canBeginDragDropTap = false
+            return nil
+        }
+
+        if let tap = dragDropTap {
+            let duration = timestamp - tap.startTime
+            if touch.identifier != tap.identifier || duration < 0 || duration > tapTimeThreshold ||
+                distance(from: tap.startPosition, to: touch.position) > movementThreshold {
+                dragDropTap = nil
+            }
+        } else if canBeginDragDropTap {
+            dragDropTap = TrackedTouch(
+                identifier: touch.identifier, startPosition: touch.position, startTime: timestamp
+            )
+            canBeginDragDropTap = false
+        }
+        return nil
+    }
+
+    private func processCombinedDragDropTap(
+        touches: [CompoundTouch], timestamp: TimeInterval, button: CompoundTapButton
+    ) -> CompoundGestureEvent? {
+        if touches.isEmpty {
+            if let anchor = dragDropTap, dragDropSecondTouch == nil, dragDropSingleTapEligible {
+                let duration = timestamp - anchor.startTime
+                if duration >= 0 && duration <= tapTimeThreshold {
+                    resetTracking()
+                    lastCancellationReason = nil
+                    return .dragEnded(button)
+                }
+            }
+            dragDropTap = nil
+            dragDropSecondTouch = nil
+            dragDropSingleTapEligible = false
+            canBeginDragDropTap = true
+            return nil
+        }
+
+        guard touches.count <= 2 else {
+            rejectCombinedDragDropTap()
+            return nil
+        }
+
+        if touches.count == 1, let touch = touches.first {
+            if let anchor = dragDropTap {
+                guard touch.identifier == anchor.identifier, timestamp >= anchor.startTime else {
+                    rejectCombinedDragDropTap()
+                    return nil
+                }
+                if let second = dragDropSecondTouch {
+                    let duration = timestamp - second.startTime
+                    guard duration >= 0, duration <= tapTimeThreshold,
+                          distance(from: anchor.startPosition, to: touch.position) <= movementThreshold else {
+                        rejectCombinedDragDropTap()
+                        return nil
+                    }
+                    resetTracking()
+                    lastCancellationReason = nil
+                    return .dragEnded(button)
+                }
+                if timestamp - anchor.startTime > tapTimeThreshold ||
+                    distance(from: anchor.startPosition, to: touch.position) > movementThreshold {
+                    dragDropSingleTapEligible = false
+                }
+                // A held anchor may drift before the second finger arrives.
+                // Only the motion during the second-finger tap matters then.
+                if !dragDropSingleTapEligible {
+                    dragDropTap = TrackedTouch(
+                        identifier: touch.identifier,
+                        startPosition: touch.position,
+                        startTime: anchor.startTime
+                    )
+                }
+            } else if canBeginDragDropTap {
+                dragDropTap = TrackedTouch(
+                    identifier: touch.identifier, startPosition: touch.position, startTime: timestamp
+                )
+                dragDropSingleTapEligible = true
+                canBeginDragDropTap = false
+            }
+            return nil
+        }
+
+        guard let anchor = dragDropTap,
+              let currentAnchor = touches.first(where: { $0.identifier == anchor.identifier }),
+              let currentSecond = touches.first(where: { $0.identifier != anchor.identifier }),
+              distance(from: anchor.startPosition, to: currentAnchor.position) <= movementThreshold else {
+            rejectCombinedDragDropTap()
+            return nil
+        }
+        dragDropSingleTapEligible = false
+
+        if let second = dragDropSecondTouch {
+            let duration = timestamp - second.startTime
+            guard currentSecond.identifier == second.identifier,
+                  duration >= 0, duration <= tapTimeThreshold,
+                  distance(from: second.startPosition, to: currentSecond.position) <= movementThreshold else {
+                rejectCombinedDragDropTap()
+                return nil
+            }
+        } else {
+            dragDropTap = TrackedTouch(
+                identifier: anchor.identifier,
+                startPosition: currentAnchor.position,
+                startTime: anchor.startTime
+            )
+            dragDropSecondTouch = TrackedTouch(
+                identifier: currentSecond.identifier,
+                startPosition: currentSecond.position,
+                startTime: timestamp
+            )
+        }
+        return nil
+    }
+
+    private func rejectCombinedDragDropTap() {
+        dragDropTap = nil
+        dragDropSecondTouch = nil
+        dragDropSingleTapEligible = false
+        canBeginDragDropTap = false
+    }
+
     private func resetTracking() {
         anchor = nil
         tappingFinger = nil
@@ -420,6 +583,10 @@ final class CompoundTapDetector {
         canBeginTap = true
         requiresAllFingersReleased = false
         activeDragButton = nil
+        dragDropTap = nil
+        dragDropSecondTouch = nil
+        dragDropSingleTapEligible = false
+        canBeginDragDropTap = false
     }
 
     private func invalidateUntilAllFingersAreReleased(

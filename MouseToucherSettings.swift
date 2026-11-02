@@ -6,12 +6,11 @@ struct OSGesturePreset: Codable, Equatable {
     var movementThreshold: Double
     var rightClickSplit: Double
     var isThreeFingerDragEnabled: Bool
+    var dragReleaseMode: DragReleaseMode?
     // Optional for backward-compatible decoding of presets saved by v1.6-v1.8.
     var isPinchZoomEnabled: Bool?
     var pinchStartThreshold: Double?
     var pinchSensitivity: Double?
-    // Missing in builds through v2.0. Preserve the old OS presets on migration.
-    var dragCompatibility: DragCompatibilityMode?
 
     init(osVersion: String, configuration: CompoundGestureConfiguration) {
         self.osVersion = osVersion
@@ -19,10 +18,10 @@ struct OSGesturePreset: Codable, Equatable {
         movementThreshold = Double(configuration.movementThreshold)
         rightClickSplit = Double(configuration.rightClickSplit)
         isThreeFingerDragEnabled = configuration.isThreeFingerDragEnabled
+        dragReleaseMode = configuration.dragReleaseMode
         isPinchZoomEnabled = configuration.isPinchZoomEnabled
         pinchStartThreshold = Double(configuration.pinchStartThreshold)
         pinchSensitivity = Double(configuration.pinchSensitivity)
-        dragCompatibility = configuration.dragCompatibility
     }
 
     var configuration: CompoundGestureConfiguration {
@@ -31,20 +30,15 @@ struct OSGesturePreset: Codable, Equatable {
             movementThreshold: CGFloat(movementThreshold),
             rightClickSplit: CGFloat(rightClickSplit),
             isThreeFingerDragEnabled: isThreeFingerDragEnabled,
+            dragReleaseMode: dragReleaseMode ?? .holdThreeFingers,
             isPinchZoomEnabled: isPinchZoomEnabled ?? true,
             pinchStartThreshold: CGFloat(
                 pinchStartThreshold ?? Double(CompoundGestureConfiguration.defaultPinchStartThreshold)
             ),
             pinchSensitivity: CGFloat(
                 pinchSensitivity ?? Double(CompoundGestureConfiguration.defaultPinchSensitivity)
-            ),
-            dragCompatibility: dragCompatibility ?? migratedDragCompatibility
+            )
         ).normalized
-    }
-
-    private var migratedDragCompatibility: DragCompatibilityMode {
-        guard let major = Int(osVersion.split(separator: ".").first ?? "") else { return .automatic }
-        return major <= 26 ? .macOS26 : .automatic
     }
 }
 
@@ -96,11 +90,7 @@ final class MouseToucherSettings {
         // Every exact system version gets its own editable preset. On the first
         // launch after an OS update or downgrade, start from the chosen default.
         if presetsByVersion[currentOSVersion] == nil {
-            var fallback = presetsByVersion[defaultPresetVersion]?.configuration ?? .default
-            // Keep tuning values across upgrades, but choose the new OS's
-            // transport automatically. Explicit choices in existing presets
-            // and "apply to current OS" are never overwritten.
-            fallback.dragCompatibility = .automatic
+            let fallback = presetsByVersion[defaultPresetVersion]?.configuration ?? .default
             presetsByVersion[currentOSVersion] = OSGesturePreset(
                 osVersion: currentOSVersion,
                 configuration: fallback

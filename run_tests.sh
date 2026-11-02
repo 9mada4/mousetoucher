@@ -12,9 +12,22 @@ swiftc \
     Sources/MouseToucherLib/CompoundTapDetector.swift \
     MouseToucherSettings.swift \
     DragEventMonitor.swift \
-    WindowDragController.swift \
     NativeMagnificationEmitter.swift \
     Tests/CompoundTapDetectorTests.swift \
     -o "$TEST_BUILD_DIR/MouseToucherLogicTests"
 
 "$TEST_BUILD_DIR/MouseToucherLogicTests"
+
+# Link the private framework for the manager's production implementation, but
+# use fake device access in every test: no devices are enumerated or started.
+swiftc \
+    -import-objc-header MultitouchBridge.h \
+    -F /System/Library/PrivateFrameworks \
+    -framework MultitouchSupport \
+    -Xlinker -rpath -Xlinker /System/Library/PrivateFrameworks \
+    Sources/MouseToucherLib/CompoundTapDetector.swift \
+    MultitouchManager.swift \
+    Tests/MultitouchManagerTests.swift \
+    -o "$TEST_BUILD_DIR/MultitouchManagerTests"
+
+"$TEST_BUILD_DIR/MultitouchManagerTests"

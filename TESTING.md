@@ -15,27 +15,29 @@ The suite currently checks:
 - a single finger never produces a click
 - anchor plus a left- or right-side tap produces the correct button
 - the same anchor can remain down, drift, and be reused for consecutive clicks
-- three fingers begin a drag immediately and lifting every finger ends the drag
+- the default three-finger drag continues through partial contact loss and ends when all fingers lift
+- the optional tap release mode keeps a drag active across empty frames; a fresh isolated single-finger tap ends it exactly once without a click
+- the combined release mode also ends a drag when an anchor finger remains down and another finger taps
+- long holds, movement, replacement touch IDs, and adding another finger invalidate the drop tap
+- after a drop, ordinary clicking and the next three-finger drag work again
+- periodic device refresh is deferred throughout a latched drag and resumes after release
+- a drag beginning during device enumeration also prevents callback replacement
+- changed devices still restart monitoring while idle; explicit stop/disable still ends a drag
 - mouse movement maps to continuous dragged events while a drag is active
 - two-finger expansion and contraction produce continuous native magnification values
 - simultaneous two-finger contact can begin pinch without becoming an accidental click
 - disabling or cancelling pinch safely ends the native magnification sequence
 - disabling three-finger drag rejects the gesture and reports the reason
 - adjustable thresholds and the left/right boundary are applied correctly
-- finger movement or partial contact loss does not interrupt an active drag
+- finger movement or partial contact loss does not interrupt an active drag while another finger remains
 - cancelling or disabling always releases an active drag
 - finger movement, anchor movement, and replacement touches are rejected with a visible reason
 - invalid gestures require a clean release before recognition resumes
-- OS-version presets persist, follow the detected system version, and use the chosen default after an OS change
-- compatibility defaults to the appropriate OS path and explicit macOS 26/27 overrides are respected
-- old presets migrate without losing tuning, and a saved legacy selection remains available on macOS 27
-- changing compatibility ends an active drag exactly once
-- the macOS 27 transport observes motion at the HID tap and posts fresh dragged events at the session tap; macOS 26 retains its session-tap conversion
+- OS-version presets persist, follow the detected system version, and copy tuning after an OS change
+- presets with removed drag choices migrate without losing their tuning or other OS presets
+- the shared Hammerspoon-style transport observes motion at the HID tap and posts fresh dragged events at the session tap
 - the modern drag source allows hardware mouse and keyboard events during synthetic dragging
-- drag conversion preserves coordinates (including negative display coordinates), motion deltas, timestamp, modifiers, and button/source pairing
-- fresh macOS 27 dragged events leave the original motion unchanged and share a source with down/up
-- title-bar detection excludes interactive controls and document content
-- direct window movement uses absolute pointer displacement, stops after release or a failed position write, and never retargets a different window mid-gesture
+- fresh dragged events leave the original motion unchanged and share a source with down/up
 - consecutive click counts increment for double- and multi-clicks
 - changing the button, waiting too long, moving the cursor, or resetting starts a new click sequence
 
@@ -53,9 +55,9 @@ Build the complete universal macOS application:
 ./build.sh
 ```
 
-The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 2.6.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
+The application build compiles both Apple Silicon and Intel binaries, combines them into `build/MouseToucher 3.5.app`, embeds the generated `AppIcon.icns`, and applies an ad-hoc signature.
 
-For macOS 27 Command Line Tools without Intel Swift compatibility libraries, build the local Apple Silicon app with `ARCHS=arm64 ./build.sh`. Verify the actual output with `lipo -info "build/MouseToucher 2.6.app/Contents/MacOS/MouseToucher 2.6"`. The included build uses arm64; universal compilation must be checked with a toolchain providing the Intel runtime libraries.
+For macOS 27 Command Line Tools without Intel Swift compatibility libraries, build the local Apple Silicon app with `ARCHS=arm64 ./build.sh`. Verify the actual output with `lipo -info "build/MouseToucher 3.5.app/Contents/MacOS/MouseToucher 3.5"`. The included build uses arm64; universal compilation must be checked with a toolchain providing the Intel runtime libraries.
 
 ## Manual Magic Mouse checklist
 
@@ -65,13 +67,11 @@ For macOS 27 Command Line Tools without Intel Swift compatibility libraries, bui
 - The Settings window opens and changes are saved without rebuilding.
 - The displayed current macOS version matches `sw_vers`, and its exact preset is marked as current.
 - Adding an arbitrary past or future OS preset, marking it as default, and applying it to the current OS all work.
-- In the current preset, switch **ドラッグ互換性** between automatic, macOS 26, and macOS 27. Automatic must report the legacy transport on macOS 27; the explicit macOS 27 choice must report the modern transport. Confirm **ドラッグ入力** changes immediately, then restart and check the choice persists. Editing another preset must not change the active mode until it is applied.
-- On macOS 27, compare automatic (legacy) and explicit macOS 27 compatibility. Place the pointer on a Finder or another app's draggable title-bar area, place three fingers on the Magic Mouse, and move the physical mouse. Note whether the **window itself** follows continuously and stops when all fingers lift. Repeat across displays and after partial finger release. File dragging alone does not validate this regression.
-- In each mode, enter Mission Control, place the pointer over an app window preview, begin a three-finger drag, and move it to another Space in the top row. Note whether the preview follows the pointer and moves to the destination Space when all fingers lift. Repeat with a physical mouse press as a control.
-
-Before the fresh-event change, macOS 27.0 testing found that a physical mouse press moved a Mission Control preview, while three-finger drag did not in either compatibility mode. A normal window moved in explicit macOS 27 mode through the direct title-bar path, but not in legacy mode. The previous synthetic down, dragged, and up sequence was visible to an event tap, yet did not move the Mission Control preview. With the fresh-event session-posting path in MouseToucher 2.6 and explicit macOS 27 mode, the user confirmed that three-finger drag moved a Mission Control preview to another desktop. Automated event-shape tests alone do not establish that result.
-- In both modes, check ordinary file dragging, text selection, two-finger clicks, and pinch zoom. Repeat the original behavior checks on a macOS 26 machine when available.
-- Switch compatibility or disable the app during a drag; the held button must release. If input monitoring cannot start, Settings must report it and no synthetic button-down should be sent.
+- There must be no drag-version selector or release-wait control. **ドラッグ入力** should show **macOS 27版・利用可能** after Accessibility permission is granted. The drag release condition should offer all-fingers-up, one-finger tap, and one-finger tap or anchor-plus-second-finger tap.
+- Drag a Finder title bar and MouseToucher’s Settings title bar. Both must use ordinary synthetic drag input, with no direct Accessibility window-position path. Repeat with a file and text selection.
+- Enter Mission Control, place the pointer over an app window preview, begin a three-finger drag, and move it to another Space in the top row. Note whether the preview follows the pointer and moves to the destination Space after lifting all fingers. Repeat with a physical mouse press as a control.
+- Check ordinary file dragging, text selection, two-finger clicks, and pinch zoom.
+- Change gesture settings or disable the app during a drag; the held button must release. If input monitoring cannot start, Settings must report it and no synthetic button-down should be sent.
 - The live status updates touch count, gesture state, recognized operation, and cancellation reason.
 - With the app running, put the Mac to sleep and wake it. After the Magic Mouse reconnects, verify touch count updates and taps, dragging, and pinch zoom work without restarting the app.
 - Turn the Magic Mouse off and back on while the app stays open. Within a few seconds of reconnection, verify touch count and gestures work again. Repeat with the mouse disconnected when the app starts.
@@ -84,18 +84,22 @@ Before the fresh-event change, macOS 27.0 testing found that a physical mouse pr
 - Hold one finger still and tap the left half with a second finger: one left-click occurs.
 - Hold one finger still and tap the right half with a second finger: one right-click occurs.
 - Repeat the second-finger tap while keeping the anchor down: double-click and multi-click actions work.
-- Place three fingers, move the mouse immediately, then lift every finger: the item follows continuously during movement and drops without jumping only at the end.
+- With the default release condition, place three fingers and move the mouse. Reduce to two and one finger: the item must still follow. Lift the final finger: the item must drop exactly once.
+- Select one-finger tap release. Lift every finger, wait several seconds, then move again: the item must still follow. Briefly touch and release one finger to drop without an extra click.
+- Select the combined release mode. Verify both a one-finger tap and the app's usual click gesture (rest one finger, tap with another) drop once without an extra click. A physical button press alone must not drop the item.
 - Moving either finger during a two-finger click cancels only that click; the anchor can stay down for another attempt.
-- Finger movement or partial contact loss after a three-finger drag begins does not release the dragged item.
+- Finger movement or partial contact loss after a three-finger drag begins does not release the dragged item while one finger remains.
+- Stop mouse movement for at least 15 seconds while keeping three fingers in place, then move again. Record whether the item stays attached and whether the status says **ドラッグ中** or **ドロップ**. Lift all fingers and confirm the default mode drops; repeat in tap release mode to confirm it remains active until the tap.
+- In a tap release mode, hold one finger longer than the tap threshold, move it beyond the movement tolerance, or add a second finger during its tap: none may drop the item. Lift all fingers, then make a fresh short single-finger tap to drop.
 - Adding a third finger begins a drag when three-finger drag is enabled.
-- Pressing the physical mouse button cancels the gesture but still performs the normal physical click.
+- Outside a latched drag, pressing the physical mouse button cancels touch recognition but still performs the normal physical click.
 - Disabling compound tap prevents synthesized clicks immediately.
 - Quitting and relaunching the installed application preserves Accessibility permission.
 
 ## Scope
 
-For the direct title-bar path, first test a standard Finder title bar and MouseToucher's Settings title bar. After the gesture, **最後のドラッグ方式** should say **タイトルバー：ウィンドウ位置を直接移動**. Test the center of the title bar, away from buttons and tabs. Confirm files and text still drag normally; test changing compatibility, disabling the app, quitting, and pressing the physical mouse button during movement. No synthetic button-down/up is sent for direct window movement. Native edge snapping and dragging between Spaces are outside this path's scope.
+Drag handling uses one macOS 27 Hammerspoon-style implementation for every target. It has no periodic event timer or direct window-position exception.
 
-Automated tests do not post real click events or connect to MultitouchSupport. Those integrations depend on macOS Accessibility permission, the connected mouse, and Apple's private framework, so they are covered by the manual checklist above.
+Automated tests do not post real click events or open multitouch devices. Device-refresh tests run the actual manager with a mocked framework boundary; no physical mouse is accessed. Those integrations depend on macOS Accessibility permission, the connected mouse, and Apple's private framework, so they are covered by the manual checklist above.
 
-The transport and event-shape tests do not prove that a real window moves. Complete the title-bar test above after granting Accessibility permission to the newly named app. macOS 26 behavior requires validation on macOS 26 hardware; selecting its compatibility mode on macOS 27 only checks the legacy code path.
+The event-shape tests do not prove that a real window moves. Complete the window and stationary-contact checks above after granting Accessibility permission to the newly named app.

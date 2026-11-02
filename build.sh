@@ -12,7 +12,7 @@ for architecture in "${ARCHITECTURES[@]}"; do
     esac
 done
 
-APP_NAME="MouseToucher 2.6"
+APP_NAME="MouseToucher 3.5"
 BUILD_DIR="build"
 APP_PATH="$BUILD_DIR/$APP_NAME.app"
 ICON_SOURCE="Assets/AppIcon.png"
@@ -68,7 +68,6 @@ for architecture in "${ARCHITECTURES[@]}"; do
         Sources/MouseToucherLib/CompoundTapDetector.swift \
         MouseToucherSettings.swift \
         DragEventMonitor.swift \
-        WindowDragController.swift \
         NativeMagnificationEmitter.swift \
         MultitouchManager.swift \
         SettingsWindowController.swift \

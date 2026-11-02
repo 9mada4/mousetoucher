@@ -1,5 +1,9 @@
 import AppKit
 
+private final class SettingsDocumentView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 final class SettingsWindowController: NSWindowController {
     var onActiveConfigurationChanged: ((CompoundGestureConfiguration) -> Void)?
     var onLaunchAtLoginChanged: ((Bool) -> Bool)?
@@ -8,9 +12,7 @@ final class SettingsWindowController: NSWindowController {
     private var selectedPresetVersion: String
 
     private let presetPopup = NSPopUpButton()
-    private let dragCompatibilityPopup = NSPopUpButton()
     private let dragMonitorStatusLabel = NSTextField(labelWithString: "アクセシビリティの許可待ち")
-    private let windowDragStatusLabel = NSTextField(labelWithString: "未実行")
     private let tapTimeSlider = NSSlider()
     private let movementSlider = NSSlider()
     private let splitSlider = NSSlider()
@@ -22,6 +24,7 @@ final class SettingsWindowController: NSWindowController {
     private let pinchStartValueLabel = NSTextField(labelWithString: "")
     private let pinchSensitivityValueLabel = NSTextField(labelWithString: "")
     private let threeFingerDragCheckbox = NSButton()
+    private let dragReleasePopup = NSPopUpButton()
     private let pinchZoomCheckbox = NSButton()
     private let launchAtLoginCheckbox = NSButton()
 
@@ -40,12 +43,13 @@ final class SettingsWindowController: NSWindowController {
         super.init(window: nil)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 850),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 720),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "MouseToucher 2.3 設定"
+        window.title = "MouseToucher 3.5 設定"
+        window.minSize = NSSize(width: 620, height: 500)
         window.isReleasedWhenClosed = false
         window.center()
         self.window = window
@@ -80,15 +84,11 @@ final class SettingsWindowController: NSWindowController {
         launchAtLoginCheckbox.state = enabled ? .on : .off
     }
 
-    func setDragMonitorStatus(mode: DragCompatibilityMode, isAvailable: Bool) {
+    func setDragMonitorStatus(isAvailable: Bool) {
         dragMonitorStatusLabel.stringValue = isAvailable
-            ? "\(mode.displayName)・利用可能"
+            ? "macOS 27版・利用可能"
             : "入力監視を開始できません。権限を確認し、再起動してください。"
         dragMonitorStatusLabel.textColor = isAvailable ? .labelColor : .systemRed
-    }
-
-    func setWindowDragStatus(_ message: String) {
-        windowDragStatusLabel.stringValue = message
     }
 
     private func configureControls(
@@ -141,12 +141,17 @@ final class SettingsWindowController: NSWindowController {
         threeFingerDragCheckbox.target = self
         threeFingerDragCheckbox.action = #selector(configurationControlChanged)
 
-        for mode in DragCompatibilityMode.allCases {
-            dragCompatibilityPopup.addItem(withTitle: mode.displayName)
-            dragCompatibilityPopup.lastItem?.representedObject = mode.rawValue
+        dragReleasePopup.addItems(withTitles: [
+            "3本指をすべて離したら解除",
+            "1本指でタップして解除",
+            "1本指タップ／固定指＋もう1本のタップで解除"
+        ])
+        for (index, mode) in DragReleaseMode.allCases.enumerated() {
+            dragReleasePopup.item(at: index)?.representedObject = mode.rawValue
         }
-        dragCompatibilityPopup.target = self
-        dragCompatibilityPopup.action = #selector(configurationControlChanged)
+        dragReleasePopup.target = self
+        dragReleasePopup.action = #selector(configurationControlChanged)
+
         dragMonitorStatusLabel.maximumNumberOfLines = 2
         dragMonitorStatusLabel.lineBreakMode = .byWordWrapping
 
@@ -217,18 +222,19 @@ final class SettingsWindowController: NSWindowController {
 
         let resetButton = makeButton(title: "選択中のプリセットを初期設定へ戻す", action: #selector(resetPreset))
 
-        let compatibilityRow = NSStackView(views: [
-            NSTextField(labelWithString: "ドラッグ互換性"), dragCompatibilityPopup
-        ])
-        compatibilityRow.orientation = .horizontal
-        compatibilityRow.spacing = 12
+        let dragHint = NSTextField(wrappingLabelWithString:
+            "3本指でドラッグを開始します。タップで解除する設定では、すべての指を離してから短くタップします。"
+        )
+        dragHint.textColor = .secondaryLabelColor
+        dragHint.widthAnchor.constraint(equalToConstant: 550).isActive = true
 
         let behaviorStack = NSStackView(views: [
             makeSectionTitle("判定"),
             settingsGrid,
             pinchZoomCheckbox,
             threeFingerDragCheckbox,
-            compatibilityRow,
+            NSStackView(views: [NSTextField(labelWithString: "ドラッグの解除条件"), dragReleasePopup]),
+            dragHint,
             launchAtLoginCheckbox,
             resetButton
         ])
@@ -238,7 +244,6 @@ final class SettingsWindowController: NSWindowController {
 
         let statusGrid = NSGridView(views: [
             [NSTextField(labelWithString: "ドラッグ入力"), dragMonitorStatusLabel],
-            [NSTextField(labelWithString: "最後のドラッグ方式"), windowDragStatusLabel],
             [NSTextField(labelWithString: "接触指の数"), touchCountLabel],
             [NSTextField(labelWithString: "認識状態"), gestureStateLabel],
             [NSTextField(labelWithString: "最後に認識した操作"), recognizedGestureLabel],
@@ -268,12 +273,25 @@ final class SettingsWindowController: NSWindowController {
         mainStack.spacing = 15
         mainStack.translatesAutoresizingMaskIntoConstraints = false
 
-        contentView.addSubview(mainStack)
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        let documentView = SettingsDocumentView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = documentView
+        contentView.addSubview(scrollView)
+        documentView.addSubview(mainStack)
         NSLayoutConstraint.activate([
-            mainStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
-            mainStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            mainStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 22),
-            mainStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -22)
+            scrollView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            mainStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 24),
+            mainStack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -24),
+            mainStack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 22),
+            mainStack.bottomAnchor.constraint(equalTo: documentView.bottomAnchor, constant: -22)
         ])
     }
 
@@ -328,10 +346,10 @@ final class SettingsWindowController: NSWindowController {
         pinchSensitivitySlider.doubleValue = Double(configuration.pinchSensitivity)
         pinchZoomCheckbox.state = configuration.isPinchZoomEnabled ? .on : .off
         threeFingerDragCheckbox.state = configuration.isThreeFingerDragEnabled ? .on : .off
-        if let item = dragCompatibilityPopup.itemArray.first(where: {
-            ($0.representedObject as? String) == configuration.dragCompatibility.rawValue
+        if let item = dragReleasePopup.itemArray.first(where: {
+            ($0.representedObject as? String) == configuration.dragReleaseMode.rawValue
         }) {
-            dragCompatibilityPopup.select(item)
+            dragReleasePopup.select(item)
         }
         updateValueLabels()
     }
@@ -342,12 +360,10 @@ final class SettingsWindowController: NSWindowController {
             movementThreshold: CGFloat(movementSlider.doubleValue),
             rightClickSplit: CGFloat(splitSlider.doubleValue),
             isThreeFingerDragEnabled: threeFingerDragCheckbox.state == .on,
+            dragReleaseMode: DragReleaseMode(rawValue: dragReleasePopup.selectedItem?.representedObject as? String ?? "") ?? .holdThreeFingers,
             isPinchZoomEnabled: pinchZoomCheckbox.state == .on,
             pinchStartThreshold: CGFloat(pinchStartSlider.doubleValue),
-            pinchSensitivity: CGFloat(pinchSensitivitySlider.doubleValue),
-            dragCompatibility: DragCompatibilityMode(
-                rawValue: dragCompatibilityPopup.selectedItem?.representedObject as? String ?? ""
-            ) ?? .automatic
+            pinchSensitivity: CGFloat(pinchSensitivitySlider.doubleValue)
         ).normalized
     }
 

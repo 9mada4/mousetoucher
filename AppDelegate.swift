@@ -12,13 +12,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: MouseToucherSettings?
     private var settingsWindowController: SettingsWindowController?
     private let dragEventMonitor = DragEventMonitor()
-    private let windowDragController = WindowDragController()
     private let magnificationEmitter = NativeMagnificationEmitter()
     private var clickSequenceTracker = ClickSequenceTracker(
         doubleClickInterval: NSEvent.doubleClickInterval,
         maximumCursorMovement: 5.0
     )
-    private var activeDrag: (button: CompoundTapButton, clickCount: Int64, movesWindow: Bool)?
+    private var activeDrag: (button: CompoundTapButton, clickCount: Int64)?
     private var isMagnifying = false
     private var isSleeping = false
     private var deviceRefreshTimer: Timer?
@@ -51,7 +50,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasShownAccessibilityInstructions = true
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "MouseToucher 2.6 needs accessibility permissions to simulate clicks and native pinch gestures.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 2.6. The app will begin working as soon as permission is granted."
+        alert.informativeText = "MouseToucher 3.5 needs accessibility permissions to simulate clicks and native pinch gestures.\n\nPlease grant permission in:\nSystem Settings > Privacy & Security > Accessibility\n\nAfter enabling, return to MouseToucher 3.5. The app will begin working as soon as permission is granted."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Quit")
@@ -97,7 +96,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, !self.isSleeping else { return }
             self.wakeRecoveryTask = nil
             self.multitouchManager?.refreshDevices(force: true)
-            _ = self.startDragEventMonitor(configuration: self.settings?.activeConfiguration ?? .default)
+            _ = self.startDragEventMonitor()
         }
         wakeRecoveryTask = task
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: task)
@@ -107,7 +106,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 2.6")
+            button.image = NSImage(systemSymbolName: "computermouse.fill", accessibilityDescription: "MouseToucher 3.5")
         }
 
         let menu = NSMenu()
@@ -126,12 +125,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(accessibilityItem)
 
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "About MouseToucher 2.6", action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "About MouseToucher 3.5", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        let restartItem = NSMenuItem(title: "Restart MouseToucher 2.6", action: #selector(restart), keyEquivalent: "")
+        let restartItem = NSMenuItem(title: "Restart MouseToucher 3.5", action: #selector(restart), keyEquivalent: "")
         restartItem.target = self
         menu.addItem(restartItem)
-        menu.addItem(NSMenuItem(title: "Quit MouseToucher 2.6", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit MouseToucher 3.5", action: #selector(quit), keyEquivalent: "q"))
 
         statusItem?.menu = menu
     }
@@ -155,7 +154,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showAbout() {
         let alert = NSAlert()
-        alert.messageText = "MouseToucher 2.6"
+        alert.messageText = "MouseToucher 3.5"
         alert.informativeText = """
         Intentional tap-to-click for Magic Mouse
 
@@ -164,11 +163,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         • Tap the right side with another finger for right click
         • Repeat taps for double and multi-click
         • Pinch with two fingers for smooth native zoom
-        • Place three fingers to drag immediately; lift all fingers to drop
+        • Place three fingers to drag; release all fingers to drop by default
+        • Choose one-finger or two-finger tap release in Settings
         • Tune gesture recognition in Settings
         • Automatically use a preset for the current macOS version
 
-        Version 2.6
+        Version 3.5
 
         Uses private MultitouchSupport framework
         """
@@ -193,7 +193,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 if let error {
                     let alert = NSAlert(error: error)
-                    alert.messageText = "MouseToucher 2.6 Could Not Restart"
+                    alert.messageText = "MouseToucher 3.5 Could Not Restart"
                     alert.runModal()
                     return
                 }
@@ -218,7 +218,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hasStartedMultitouch = true
 
         let configuration = settings?.activeConfiguration ?? .default
-        _ = startDragEventMonitor(configuration: configuration)
+        _ = startDragEventMonitor()
         multitouchManager = MultitouchManager(configuration: configuration)
         multitouchManager?.onGestureRecognized = { [weak self] location, event in
             let handleEvent: () -> Void = {
@@ -267,19 +267,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onActiveConfigurationChanged = { [weak self] configuration in
             guard let self else { return }
             self.clickSequenceTracker.reset()
-            // End with the old event source before changing transport.
+            // Release any active gesture before applying the new settings.
             self.multitouchManager?.updateConfiguration(configuration)
             if self.hasStartedMultitouch {
-                _ = self.startDragEventMonitor(configuration: configuration)
+                _ = self.startDragEventMonitor()
             }
         }
         controller.onLaunchAtLoginChanged = { [weak self] enabled in
             self?.setLaunchAtLogin(enabled) ?? false
         }
         settingsWindowController = controller
-        windowDragController.onFailure = { [weak controller] in
-            controller?.setWindowDragStatus("ウィンドウ位置を変更できませんでした")
-        }
     }
 
     private var isLaunchAtLoginAvailable: Bool {
@@ -312,7 +309,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if enabled, SMAppService.mainApp.status == .requiresApproval {
                 let alert = NSAlert()
                 alert.messageText = "ログイン時の自動起動を許可してください"
-                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 2.6 を許可してください。"
+                alert.informativeText = "システム設定の「一般 > ログイン項目」で MouseToucher 3.5 を許可してください。"
                 alert.addButton(withTitle: "ログイン項目を開く")
                 alert.addButton(withTitle: "後で")
                 if alert.runModal() == .alertFirstButtonReturn {
@@ -407,30 +404,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func beginDrag(at location: CGPoint, button: CompoundTapButton) {
         guard activeDrag == nil else { return }
-        guard startDragEventMonitor(configuration: settings?.activeConfiguration ?? .default) else { return }
-        if dragEventMonitor.compatibilityMode == .macOS27, button == .left,
-           windowDragController.begin(at: location) {
-            clickSequenceTracker.reset()
-            activeDrag = (button: button, clickCount: 1, movesWindow: true)
-            dragEventMonitor.beginWindowDrag()
-            settingsWindowController?.setWindowDragStatus("タイトルバー：ウィンドウ位置を直接移動")
-            return
-        }
+        guard startDragEventMonitor() else { return }
         let clickCount = nextClickCount(button: button, location: location)
         guard let downEvent = dragEventMonitor.buttonEvent(
             isDown: true, at: location, button: button, clickCount: clickCount
         ) else { return }
-        activeDrag = (button: button, clickCount: clickCount, movesWindow: false)
-        settingsWindowController?.setWindowDragStatus("通常のドラッグ入力")
+        activeDrag = (button: button, clickCount: clickCount)
         dragEventMonitor.begin(button: button, clickCount: clickCount)
         downEvent.post(tap: dragEventMonitor.eventPostLocation)
     }
 
     @discardableResult
-    private func startDragEventMonitor(configuration: CompoundGestureConfiguration) -> Bool {
-        let available = dragEventMonitor.start(mode: configuration.dragCompatibility)
+    private func startDragEventMonitor() -> Bool {
+        let available = dragEventMonitor.start()
         settingsWindowController?.setDragMonitorStatus(
-            mode: dragEventMonitor.compatibilityMode,
             isAvailable: available
         )
         return available
@@ -439,13 +426,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func endActiveDrag(at location: CGPoint, expectedButton: CompoundTapButton? = nil) {
         guard let activeDrag,
               expectedButton == nil || expectedButton == activeDrag.button else {
-            return
-        }
-
-        if activeDrag.movesWindow {
-            windowDragController.end()
-            self.activeDrag = nil
-            dragEventMonitor.end()
             return
         }
 
